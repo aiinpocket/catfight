@@ -16,8 +16,8 @@ export const STAGES: StageDef[] = [
   { id: 4, name: '理財顧問', category: 'wealth', ai: { scorePerSec: 1.3, strategy: ['tank', 'archer', 'mage'] }, reward: 90 },
   { id: 5, name: '市場快訊', category: 'news', ai: { scorePerSec: 1.6, strategy: ['tank', 'archer', 'runner', 'mage'] }, reward: 100 },
   { id: 6, name: '法遵主管', category: 'bank_law', ai: { scorePerSec: 1.9, strategy: ['tank', 'mage', 'archer', 'medic'] }, reward: 120 },
-  { id: 7, name: '信託經理', category: 'trust', ai: { scorePerSec: 2.3, strategy: ['tank', 'archer', 'mage', 'medic', 'runner'] }, reward: 140 },
-  { id: 8, name: '財富總監', category: 'wealth', ai: { scorePerSec: 2.8, strategy: ['tank', 'tank', 'archer', 'mage', 'medic', 'mage'] }, reward: 160 },
+  { id: 7, name: '信託經理', category: 'trust', ai: { scorePerSec: 2.6, strategy: ['tank', 'archer', 'mage', 'medic', 'runner'] }, reward: 140 },
+  { id: 8, name: '財富總監', category: 'wealth', ai: { scorePerSec: 3.0, strategy: ['tank', 'tank', 'archer', 'mage', 'medic', 'mage'] }, reward: 160 },
 ];
 
 export const CATEGORIES: { id: string; name: string }[] = [

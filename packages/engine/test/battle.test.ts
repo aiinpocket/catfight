@@ -66,9 +66,9 @@ describe('combat', () => {
     runUntilEnd(s);
     expect(s.winner).toBe('left');
     expect(s.towerHp.right).toBe(0);
-    // (1000-50)/40 ~ 24 s walk, then 1000/30 ~ 33 s of chewing
-    expect(s.timeMs / 1000).toBeGreaterThan(55);
-    expect(s.timeMs / 1000).toBeLessThan(60);
+    // (1000-50)/40 ~ 24 s walk, then 800/30 ~ 27 s of chewing
+    expect(s.timeMs / 1000).toBeGreaterThan(45);
+    expect(s.timeMs / 1000).toBeLessThan(55);
   });
 
   it('two equal tanks meet in the middle and trade, then the survivor side keeps pushing', () => {
