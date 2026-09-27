@@ -4,10 +4,10 @@ import fastifyStatic from '@fastify/static';
 import { buildApp } from './app.js';
 import { openDb, insertQuestions, type QuestionInput } from './db.js';
 
-const DATA_DIR = process.env.DATA_DIR ?? path.resolve(process.cwd(), 'data');
+const DATA_DIR = path.resolve(process.env.DATA_DIR ?? path.resolve(process.cwd(), 'data'));
 const DB_PATH = process.env.DB_PATH ?? path.join(DATA_DIR, 'catfight.db');
-const WEB_DIR = process.env.WEB_DIR ?? path.resolve(process.cwd(), '../web/dist');
-const QUESTIONS_DIR = process.env.QUESTIONS_DIR ?? path.resolve(process.cwd(), '../../data/questions');
+const WEB_DIR = path.resolve(process.env.WEB_DIR ?? path.resolve(process.cwd(), '../web/dist'));
+const QUESTIONS_DIR = path.resolve(process.env.QUESTIONS_DIR ?? path.resolve(process.cwd(), '../../data/questions'));
 const PORT = Number(process.env.PORT ?? 8080);
 const JWT_SECRET = process.env.JWT_SECRET ?? '';
 

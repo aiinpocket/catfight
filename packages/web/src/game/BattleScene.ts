@@ -92,7 +92,8 @@ export class BattleScene extends Phaser.Scene {
     const moving = !e.attacking;
     const bob = moving ? Math.abs(Math.sin(time / 90 + e.id)) * 6 : 0;
     const lunge = e.hit ? (e.side === 'left' ? 8 : -8) : 0;
-    s.img.setPosition(this.fx(e.x) + lunge, this.groundY - bob);
+    const jitter = (e.id % 3) * 5;
+    s.img.setPosition(this.fx(e.x) + lunge + (e.side === 'left' ? -jitter : jitter), this.groundY - bob);
     s.img.setDepth(10 + (e.side === 'left' ? e.x : FIELD_LENGTH - e.x) / 100);
     if (e.hit) s.img.setTint(0xffffff);
     else if (e.side === 'right') s.img.setTint(0xffc9c9);
@@ -111,7 +112,7 @@ export class BattleScene extends Phaser.Scene {
     const max = BALANCE.towerHp;
     const w = 90;
     const x = side === 'left' ? this.padX - 10 - w / 2 : width - this.padX + 10 - w / 2;
-    const y = 30;
+    const y = 46;
     g.clear();
     g.setDepth(60);
     g.fillStyle(0x000000, 0.6).fillRect(x, y, w, 8);

@@ -58,6 +58,8 @@ export function runBattle(root: HTMLElement, setup: BattleSetup): Promise<{ outc
     root.appendChild(wrap);
 
     const state: BattleState = createBattle();
+    // debug/e2e hook
+    (window as unknown as { __cf?: unknown }).__cf = { get entities() { return state.entities.length; }, get state() { return state; } };
     const ai = createAi('right', { ...setup.ai, strategy: setup.ai.strategy.length ? setup.ai.strategy : DEFAULT_STRATEGY });
     let totalScore = 0;
     let finished = false;

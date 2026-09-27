@@ -168,7 +168,7 @@ export function shopScreen(ctx: Ctx) {
     for (const u of Object.values(UNITS)) {
       const owned = me.unlockedUnits.includes(u.id);
       const b = document.createElement('button');
-      b.className = 'list-btn card';
+      b.className = 'list-btn card' + (owned ? ' owned' : '');
       b.disabled = owned || me.points < u.unlockCost;
       b.innerHTML = `<img src="/assets/${u.id}.png" alt=""><div class="grow"><div class="title">${u.name}</div><div class="meta">${u.desc}<br>召喚 ${u.cost} 分 ・ 血 ${u.hp} ・ 攻 ${u.dps}/秒${u.range > 30 ? ` ・ 射程 ${u.range}` : ''}</div></div>
         <div class="pill">${owned ? '已解鎖' : `${u.unlockCost} 點`}</div>`;
