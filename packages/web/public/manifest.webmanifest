@@ -1,0 +1,10 @@
+{
+  "name": "金融貓咪大作戰",
+  "short_name": "金融貓",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#1b2a4a",
+  "theme_color": "#1b2a4a",
+  "icons": [{ "src": "/assets/tank.png", "sizes": "201x256", "type": "image/png" }]
+}
