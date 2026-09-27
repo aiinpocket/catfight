@@ -1,0 +1,12 @@
+{
+  "name": "catfight",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "test": "npm run test -w @catfight/engine && npm run test -w @catfight/server",
+    "build": "npm run build -w @catfight/engine && npm run build -w @catfight/web && npm run build -w @catfight/server",
+    "dev:server": "npm run dev -w @catfight/server",
+    "dev:web": "npm run dev -w @catfight/web",
+    "balance": "npm run balance -w @catfight/engine"
+  }
+}
