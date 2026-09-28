@@ -36,7 +36,7 @@ packages/engine   純 TS 戰鬥模擬（確定性、可無頭跑）＋ AI ＋ �
 packages/server   Fastify 5 + PostgreSQL（pg；測試與本機開發可用內嵌 PGlite）+ bcrypt + JWT；也服務前端靜態檔
 packages/web      Vite + Phaser 3 + DOM UI，Playwright 煙霧測試
 data/questions    題庫 JSON（每檔一個分類；*.json 不進 git，格式見該目錄 README）
-tools/            tabf_import.py（金研院考古題 PDF → 題庫）、gen_art.py / gen_bosses.py（ComfyUI 產圖）
+tools/            tabf_import.py（考古題 PDF → 題庫 JSON，可選）、gen_art.py / gen_bosses.py（ComfyUI 產圖）
 deploy/           Caddyfile 與 GCP VM 部署腳本
 docs/superpowers/specs  設計文件
 ```
@@ -65,29 +65,40 @@ cd packages/web && npx playwright install chromium && npx playwright test
 
 ## 題庫
 
-題庫從空開始，repo 內不含任何題目。`data/questions/<分類id>.json` 一檔一分類（格式見 [data/questions/README.md](data/questions/README.md)），伺服器每次啟動自動匯入：
+**這個 repo 只含遊戲系統，不含任何題目**：題庫從空開始，部署後自行加題。`data/questions/<分類id>.json` 一檔一分類（格式見 [data/questions/README.md](data/questions/README.md)；`*.json`、`data/pdf/`、`data/*.xlsx` 都被 `.gitignore` 排除，不會被 commit 進來），伺服器每次啟動自動匯入：
 
 - 去重鍵是（分類、題幹、選項），同題幹不同選項視為不同題；重匯同一題會更新答案與出處，修正題庫只要改 JSON 再重啟。
-- 每場從分類中隨機抽題，**選項順序每次送出都重新洗牌**。
+- 每場從分類中隨機抽題，**選項順序每次送出都重新洗牌**；「以上皆是／甲、乙、丙皆非」這類總結型選項固定留在最後。
 - 關卡由分類依 `sortOrder` 輪流產生，AI 出兵速度隨關卡數遞增。
+- 同一個分類 id 可以拆成多個檔案（例如不同來源各一檔），匯入時會合併。
 
-手動匯入：`DATABASE_URL=… npm run import-questions -w @catfight/server -- data/questions`。
-
-### 匯入金研院考古題
+事先驗證格式與試匯入（不需要 Docker，用內嵌 PGlite）：
 
 ```bash
-# 兩節試題 + 答案卷（<id>-1.pdf、<id>-2.pdf 試題，<id>-3.pdf 答案），例如家族信託規劃顧問
-python tools/tabf_import.py --dir data/pdf/family_trust --ids 663415,644264,617843 \
-  --category family_trust --name 家族信託規劃顧問 --sort 1 --out data/questions/family_trust.json
-
-# 單節橫式雙欄試題 + 答案卷（<id>-1.pdf 試題，<id>-2.pdf 答案），例如金融科技力
-python tools/tabf_import.py --dir data/pdf/fintech --ids 663416,644266,617844 --layout single2col \
-  --category fintech --name 金融科技力 --sort 2 --out data/questions/fintech.json
+DATABASE_URL=pglite://volumes/pglite-check npm run import-questions -w @catfight/server
 ```
 
-複選題與解析失敗的題目會列出並略過。`bash deploy/deploy.sh` 會把 `data/questions/*.json` 一併上傳到 VM。
+### 從考古題 PDF 產生題庫（可選）
 
-⚠ 考古題著作權屬原出題單位，正式營運前請確認授權。
+`tools/tabf_import.py` 能把台灣金融研訓院（TABF）與證基會（SFI）公開的考古題 PDF 轉成上述 JSON（需要 `pip install pdfplumber`）。PDF 放在 `data/pdf/<分類>/`，依版型選 `--layout`：
+
+```bash
+# two-session（預設）：<id>-1.pdf、<id>-2.pdf 兩節試題 + <id>-3.pdf 答案（金研院直式）
+python tools/tabf_import.py --dir data/pdf/<分類> --ids <id1>,<id2> \
+  --category <分類id> --name <分類名稱> --sort 1 --out data/questions/<分類id>.json
+
+# single2col：<id>-1.pdf 單節橫式雙欄試題 + <id>-2.pdf 答案（金研院橫式）；每屆 80 題的科目加 --count 80
+python tools/tabf_import.py --dir data/pdf/<分類> --ids <id1>,<id2> --layout single2col --count 80 \
+  --category <分類id> --name <分類名稱> --sort 2 --out data/questions/<分類id>.json
+
+# sfi：<id>.pdf 直式單欄 (A)-(D) 選項 + <id>a.pdf 答案表（證基會 examweb.sfi.org.tw）
+python tools/tabf_import.py --dir data/pdf/<分類> --ids <id1>,<id2> --layout sfi --count 80 \
+  --category <分類id> --name <分類名稱> --sort 3 --out data/questions/<分類id>_sfi.json
+```
+
+複選題、送分題與解析失敗的題目會列出並略過。`bash deploy/deploy.sh` 會把本機 `data/questions/*.json` 一併上傳到 VM；只更新題庫沒改程式時，記得在 VM 上 `docker compose restart app` 才會重新匯入。
+
+⚠ 考古題著作權屬原出題單位，請自行確認可否使用；本 repo 不提供也不散布任何題目。
 
 ## BOSS 與難度
 

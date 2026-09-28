@@ -21,4 +21,4 @@
 
 - `sortOrder` 決定關卡輪流的順序：第 1 關 = sortOrder 最小的分類，第 2 關 = 次小……輪完一圈再從頭，AI 強度遞增。
 - 選項在遊戲中每次送出都會重新洗牌，`answerIndex` 指的是這個檔案裡的位置。
-- 匯入前驗證格式：`DATABASE_URL=… npm run import-questions -w @catfight/server -- data/questions`。
+- 匯入前驗證格式（免 Docker）：`DATABASE_URL=pglite://volumes/pglite-check npm run import-questions -w @catfight/server`。

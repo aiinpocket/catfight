@@ -6,3 +6,4 @@ volumes/
 data/questions/*.json
 data/pdf/
 data/*.xlsx
+__pycache__/

@@ -1,6 +1,6 @@
 /**
  * Validate and import question bank JSON files into PostgreSQL.
- * usage: DATABASE_URL=postgres://... tsx scripts/import-questions.ts [dir]
+ * usage: DATABASE_URL=postgres://...  (or pglite://volumes/pglite)  tsx scripts/import-questions.ts [dir]
  *
  * File format (one file per category):
  * {
@@ -13,7 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
-import { importBank, openPg } from '../src/db.js';
+import { importBank, openPg, openPglite } from '../src/db.js';
 
 export const bankSchema = z.object({
   category: z.object({ id: z.string().regex(/^[a-z0-9_\-]{1,40}$/), name: z.string().min(1).max(40), sortOrder: z.number().int().optional() }),
@@ -34,7 +34,15 @@ if (!url) {
   console.error('DATABASE_URL required');
   process.exit(1);
 }
-const db = await openPg(url);
+// pglite://<dir> uses the embedded Postgres, same as the server's DATABASE_URL (handy to validate a bank without Docker)
+let db;
+if (url.startsWith('pglite://')) {
+  const pgDir = path.resolve(url.slice('pglite://'.length));
+  fs.mkdirSync(pgDir, { recursive: true });
+  db = await openPglite(pgDir);
+} else {
+  db = await openPg(url);
+}
 let total = 0;
 for (const f of fs.readdirSync(dir).filter((f) => f.endsWith('.json')).sort()) {
   const bank = bankSchema.parse(JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8')));

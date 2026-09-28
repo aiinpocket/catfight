@@ -69,7 +69,7 @@ catfight/
     engine/    純 TS 戰鬥模擬 + 平衡模擬腳本 + 單元測試 (vitest)
     server/    Node (Fastify) + SQLite (better-sqlite3) + bcrypt + JWT
     web/       Vite + Phaser 3 + 少量 DOM UI（題目面板、登入、選單）
-  data/questions/   題庫 JSON（金研院考古題整理）
+  data/questions/   題庫 JSON（使用者自行提供，不進 git）
   docker-compose.yml
   deploy/    VM 部署腳本
 ```
