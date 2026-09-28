@@ -297,14 +297,23 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
   return app;
 }
 
-/** Randomise option order per delivery so the same question never looks identical twice. */
+/** "以上皆是", "甲、乙、丙、丁皆非", "ABC 皆可"… — an option that sums up the others only makes sense as the last one. */
+export function isCatchAllOption(o: string): boolean {
+  const s = o.trim();
+  // short only: "以上櫃股票作價抵繳股款…" is a real statement, not a summary
+  return s.length <= 12 && (/^(以上|上述|全部)/.test(s) || /皆(是|非|正確|不正確|錯誤|對|錯|可|不可|然|不然)$/.test(s));
+}
+
+/** Randomise option order per delivery so the same question never looks identical twice.
+ *  Catch-all options stay at the end (keeping their relative order); only the rest are shuffled. */
 function shuffledQuestion(r: QuestionRow) {
   const options = (typeof r.options === 'string' ? JSON.parse(r.options) : r.options) as string[];
-  const order = options.map((_, i) => i);
+  const order = options.map((_, i) => i).filter((i) => !isCatchAllOption(options[i]));
   for (let i = order.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [order[i], order[j]] = [order[j], order[i]];
   }
+  order.push(...options.map((_, i) => i).filter((i) => isCatchAllOption(options[i])));
   return {
     id: r.id,
     category: r.category,

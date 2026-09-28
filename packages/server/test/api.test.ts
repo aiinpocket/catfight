@@ -114,6 +114,26 @@ describe('categories, questions and stages', () => {
     expect(orders.size).toBeGreaterThan(1);
   });
 
+  it('keeps catch-all options such as 以上皆是 at the end, in their original relative order', async () => {
+    await importBank(db, {
+      category: { id: 'catchall', name: '總結選項', sortOrder: 3 },
+      questions: [{ text: '總結題', options: ['甲、乙、丙、丁皆非', '以上皆是', '只有甲', '只有乙'], answerIndex: 1 }],
+    });
+    const orders = new Set<string>();
+    for (let k = 0; k < 20; k++) {
+      const one = (await app.inject({ method: 'GET', url: '/api/questions?category=catchall&limit=1', headers: H(tokenA) })).json()[0] as {
+        options: string[];
+        answerIndex: number;
+      };
+      expect(one.options.slice(2)).toEqual(['甲、乙、丙、丁皆非', '以上皆是']);
+      expect(one.answerIndex).toBe(3);
+      orders.add(one.options.slice(0, 2).join(''));
+    }
+    expect(orders.size).toBe(2);
+    await db.query("DELETE FROM questions WHERE category = 'catchall'");
+    await db.query("DELETE FROM categories WHERE id = 'catchall'");
+  });
+
   it('honours exclude, tops up small banks, rejects unknown categories', async () => {
     const first = (await app.inject({ method: 'GET', url: '/api/questions?category=finance_basics&limit=5', headers: H(tokenA) })).json() as { id: number }[];
     const ex = first.map((q) => q.id).join(',');
