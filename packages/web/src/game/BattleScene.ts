@@ -204,7 +204,7 @@ export class BattleScene extends Phaser.Scene {
 
   /** how far a melee strike carries the body; bosses are ~2.3x larger so their lunge scales with them */
   private strikeLen(boss: boolean) {
-    return boss ? 70 : 30;
+    return boss ? 52 : 30;
   }
 
   /** a weapon-swing arc in front of the target, drawn in the attacker's direction */
@@ -290,7 +290,8 @@ export class BattleScene extends Phaser.Scene {
     const pull = windup * windup * (boss ? 26 : 7);
     const jitter = (e.id % 3) * 4;
     s.img.setPosition(this.fxX(e.x) + dir * (s.lunge - pull - s.knock) - dir * jitter, this.groundY - bob);
-    s.img.setDepth(10 + (e.side === 'left' ? e.x : FIELD_LENGTH - e.x) / 100 + (boss ? 5 : 0));
+    // bosses sit behind the small cats so a victim stays visible under the big body
+    s.img.setDepth(10 + (e.side === 'left' ? e.x : FIELD_LENGTH - e.x) / 100 - (boss ? 6 : 0));
     const strike = Math.max(0, s.lunge) / this.strikeLen(boss);
     s.img.setAngle(dir * (strike * (boss ? 16 : 22) - windup * (boss ? 8 : 12)));
     // squash while charging, stretch forward on the strike, flinch when hurt, pop in on spawn
