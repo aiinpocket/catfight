@@ -39,8 +39,8 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     ports:
-      - "80:80"
-      - "443:443"
+      # only reachable from the VM itself; public traffic comes in through the Cloudflare Tunnel (cloudflared -> localhost:80)
+      - "127.0.0.1:80:80"
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
     volumes:

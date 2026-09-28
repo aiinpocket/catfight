@@ -106,6 +106,8 @@ docker compose up -d --build
 - PostgreSQL 資料在 `./volumes/postgres`（本地 volume），Caddy 憑證在 `./volumes/caddy`，題庫目錄 `./data/questions` 唯讀掛進容器。
 - 更新：`git pull && docker compose up -d --build`。
 
+正式站：https://bank.aiinpocket.com/ ，流量走 Cloudflare Tunnel（VM 上的 `cloudflared` systemd 服務 → `localhost:80` Caddy），GCP 防火牆不開 80/443，直連 IP 不通。SSH 只接受金鑰（gcloud）。
+
 GCP VM（pressure-507503 / asia-east1-b / stress）一鍵部署：
 
 ```bash

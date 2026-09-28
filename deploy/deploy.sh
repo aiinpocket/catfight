@@ -17,11 +17,7 @@ echo "archive: $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1))"
 
 ssh_vm() { gcloud compute ssh "$VM" --project="$PROJECT" --zone="$ZONE" --quiet --command="$1"; }
 
-# open 80/443 once (idempotent)
-if ! gcloud compute firewall-rules describe catfight-allow-http --project="$PROJECT" >/dev/null 2>&1; then
-  gcloud compute firewall-rules create catfight-allow-http --project="$PROJECT" --network=default     --direction=INGRESS --allow=tcp:80,tcp:443 --source-ranges=0.0.0.0/0 --target-tags=catfight-web --quiet
-fi
-gcloud compute instances add-tags "$VM" --project="$PROJECT" --zone="$ZONE" --tags=catfight-web --quiet >/dev/null
+# public traffic arrives via Cloudflare Tunnel (cloudflared service on the VM -> localhost:80); no GCP firewall rule for 80/443
 
 ssh_vm "sudo mkdir -p $REMOTE_DIR && sudo chown \$USER $REMOTE_DIR"
 gcloud compute scp "$ARCHIVE" "$VM:/tmp/catfight.tgz" --project="$PROJECT" --zone="$ZONE" --quiet
@@ -51,4 +47,4 @@ ssh_vm "set -e
   sudo docker image prune -f >/dev/null
   sudo docker compose ps"
 rm -f "$ARCHIVE"
-echo "deployed. http://$(gcloud compute instances describe "$VM" --project="$PROJECT" --zone="$ZONE" --format='value(networkInterfaces[0].accessConfigs[0].natIP)')/"
+echo "deployed. https://bank.aiinpocket.com/"
