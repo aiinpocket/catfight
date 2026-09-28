@@ -9,6 +9,10 @@ export interface Ctx {
   root: HTMLElement;
   me: Me | null;
   nav: Nav;
+  /** one-shot message for the login screen (e.g. session expired) */
+  notice: string | null;
+  /** runs right after a successful login/register/boot (e.g. re-sends a battle result recorded while logged out) */
+  onLogin: () => Promise<void>;
 }
 
 
@@ -33,7 +37,7 @@ export function authScreen(ctx: Ctx) {
         <input id="u" placeholder="帳號（3–20 字英數或底線）" autocomplete="username" maxlength="20">
         ${mode === 'register' ? '<input id="d" placeholder="顯示名稱（排行榜上顯示）" maxlength="20">' : ''}
         <input id="p" type="password" placeholder="密碼（至少 8 字）" autocomplete="${mode === 'register' ? 'new-password' : 'current-password'}">
-        <div class="error" id="err"></div>
+        <div class="error" id="err">${ctx.notice ? escapeHtml(ctx.notice) : ''}</div>
         <button class="primary" id="go">${mode === 'login' ? '登入' : '建立帳號'}</button>
         <button class="ghost" id="switch">${mode === 'login' ? '還沒有帳號？建立一個' : '已有帳號？登入'}</button>
       </div>
@@ -53,6 +57,8 @@ export function authScreen(ctx: Ctx) {
         const r = mode === 'login' ? await api.login(u, p) : await api.register(u, d || u, p);
         setToken(r.token);
         ctx.me = r.me;
+        ctx.notice = null;
+        await ctx.onLogin();
         ctx.nav('menu');
       } catch (e) {
         err.textContent = (e as Error).message;
@@ -101,7 +107,7 @@ export async function stagesScreen(ctx: Ctx) {
     const b = document.createElement('button');
     b.className = 'list-btn card';
     b.disabled = !st.unlocked;
-    b.innerHTML = `<div class="pill">${st.id}</div><img src="/assets/boss/${st.boss.unitId}.png" alt="" onerror="this.style.visibility='hidden'"><div class="grow"><div class="title">${escapeHtml(st.name)} ・ ${escapeHtml(st.boss.name)} ${st.cleared ? '✅' : ''}</div><div class="meta">${escapeHtml(st.boss.desc)}<br>首次通關 +${st.reward} 點 ・ 之後每次通關 +${Math.round(st.reward / 4)} 點</div></div>`;
+    b.innerHTML = `<div class="pill">${st.id}</div><img src="/assets/boss/${st.boss.unitId}.png" alt="" onerror="this.style.visibility='hidden'"><div class="grow"><div class="title">${escapeHtml(st.name)} ・ ${escapeHtml(st.boss.name)} ${st.cleared ? '✅' : ''}</div><div class="meta">${escapeHtml(st.boss.desc)}<br>敵方小喵強化 Lv ${st.powerTier + 1} ・ 首次通關 +${st.reward} 點 ・ 之後每次通關 +${Math.round(st.reward / 4)} 點</div></div>`;
     b.addEventListener('click', () => startStage(ctx, st));
     list.appendChild(b);
   }
@@ -111,7 +117,7 @@ async function startStage(ctx: Ctx, st: StageInfo) {
   for (;;) {
     const r = await runBattle(ctx.root, { mode: 'stage', category: st.category, stage: st.id, opponentName: `第 ${st.id} 關 ${st.boss.name}`, ai: st.ai, me: ctx.me!, boss: st.boss });
     if (r.outcome) ctx.me = r.outcome.me;
-    if (!r.retry) break;
+    if (!r.retry || !ctx.me) break;
   }
   ctx.nav('stages');
 }
@@ -147,7 +153,7 @@ export async function versusScreen(ctx: Ctx) {
             me: ctx.me!,
           });
           if (r.outcome) ctx.me = r.outcome.me;
-          if (!r.retry) break;
+          if (!r.retry || !ctx.me) break;
         }
         ctx.nav('versus');
       } catch (e) {

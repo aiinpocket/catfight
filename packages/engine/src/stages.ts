@@ -8,13 +8,32 @@ export interface StageDef {
   ai: AiConfig;
   /** points granted on first clear */
   reward: number;
+  /** enemy cat power tier (0 = weakest); the AI's regular cats gain a step every POWER_STEP stages */
+  powerTier: number;
   boss: { unitId: string; name: string; desc: string; hp: number; dps: number; range: number };
 }
 
 /** Total number of stages. */
 export const STAGE_COUNT = BOSS_COUNT;
 /** AI income curve knobs: scorePerSec = base + gain * t^pow */
-export const STAGE_TUNE = { base: 0.9, gain: 3.5, pow: 1.6, respawnFrom: 60, respawnMs: 60_000 };
+export const STAGE_TUNE = { base: 0.75, gain: 3.65, pow: 1.6, respawnFrom: 60, respawnMs: 60_000 };
+/**
+ * Enemy cat power: the AI keeps its spawn cadence but its regular cats start weak and gain a step
+ * every POWER_STEP stages until they match the player's (tier POWER_MAX_TIER). Bosses are untouched.
+ */
+export const POWER_TUNE = { step: 10, startMul: 0.5, perTier: 0.1, maxTier: 5 };
+export const POWER_STEP = POWER_TUNE.step;
+export const POWER_MAX_TIER = POWER_TUNE.maxTier;
+
+export function powerTier(n: number): number {
+  return Math.min(POWER_TUNE.maxTier, Math.floor((n - 1) / POWER_TUNE.step));
+}
+
+/** hp/dps multiplier for the AI's regular cats at stage n */
+export function unitMul(n: number): { hp: number; dps: number } {
+  const m = +(POWER_TUNE.startMul + POWER_TUNE.perTier * powerTier(n)).toFixed(2);
+  return { hp: m, dps: m };
+}
 
 const STRATEGIES: string[][] = [
   ['tank', 'tank', 'archer'],
@@ -42,6 +61,7 @@ export function stageAi(n: number): AiConfig {
     strategy,
     warmupMs,
     boss: { unitId: bossId(n), atMs: Math.round(20_000 - 8_000 * t), respawnMs: n >= STAGE_TUNE.respawnFrom ? STAGE_TUNE.respawnMs : 0 },
+    unitMul: unitMul(n),
   };
 }
 
@@ -66,6 +86,7 @@ export function buildStages(categories: { id: string; name: string }[], count = 
       category: cat.id,
       ai: stageAi(n),
       reward: stageReward(n),
+      powerTier: powerTier(n),
       boss: { unitId: b.id, name: b.name, desc: b.desc, hp: b.hp, dps: b.dps, range: b.range },
     };
   });

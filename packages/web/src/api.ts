@@ -28,6 +28,7 @@ export interface StageInfo {
   reward: number;
   ai: AiConfig;
   boss: { unitId: string; name: string; desc: string; hp: number; dps: number; range: number };
+  powerTier: number;
   unlocked: boolean;
   cleared: boolean;
 }
@@ -67,6 +68,35 @@ export function getToken(): string | null {
   }
 }
 
+/** Called once whenever a request comes back 401 (token expired or revoked). Registered by main.ts. */
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: () => void) {
+  onUnauthorized = fn;
+}
+
+/**
+ * A finished battle whose result could not be recorded because the session had expired.
+ * Kept in localStorage so it can be sent again right after the next login.
+ */
+const PENDING_KEY = 'catfight.pendingResult';
+export function stashPendingResult(r: MatchResultInput) {
+  try {
+    localStorage.setItem(PENDING_KEY, JSON.stringify(r));
+  } catch {
+    /* storage unavailable */
+  }
+}
+export function takePendingResult(): MatchResultInput | null {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY);
+    if (!raw) return null;
+    localStorage.removeItem(PENDING_KEY);
+    return JSON.parse(raw) as MatchResultInput;
+  } catch {
+    return null;
+  }
+}
+
 export function setToken(t: string | null) {
   try {
     if (t) localStorage.setItem(TOKEN_KEY, t);
@@ -90,7 +120,12 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
   const res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    if (res.status === 401) setToken(null);
+    // a 401 on an authenticated call means the session is gone: drop the token and let the app go back to login.
+    // login/register themselves also answer 401 on a wrong password; that is not a session expiry.
+    if (res.status === 401 && t && !url.startsWith('/api/auth/')) {
+      setToken(null);
+      onUnauthorized?.();
+    }
     throw new ApiError(res.status, (data as { error?: string }).error ?? `HTTP ${res.status}`);
   }
   return data as T;

@@ -149,12 +149,16 @@ describe('categories, questions and stages', () => {
       id: number;
       category: string;
       unlocked: boolean;
-      ai: { scorePerSec: number; boss: { unitId: string } };
+      ai: { scorePerSec: number; boss: { unitId: string }; unitMul: { hp: number } };
+      powerTier: number;
       boss: { name: string; desc: string };
     }[];
     expect(st.length).toBe(100);
     expect(st.map((s) => s.category).slice(0, 4)).toEqual(['finance_basics', 'security', 'finance_basics', 'security']);
     expect(st[20].ai.scorePerSec).toBeGreaterThan(st[0].ai.scorePerSec);
+    expect(st[0].powerTier).toBe(0);
+    expect(st[10].powerTier).toBe(1);
+    expect(st[0].ai.unitMul.hp).toBeLessThan(st[10].ai.unitMul.hp);
     // bosses are ordered by historical exit year: 太田道灌 (d. 1486) opens, 真田信之 (d. 1658) closes
     expect(st[0].boss.name).toBe('太田道灌喵');
     expect(st[0].ai.boss.unitId).toBe('boss_1');

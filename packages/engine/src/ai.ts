@@ -18,6 +18,8 @@ export interface AiConfig {
   warmupMs?: number;
   /** stage boss */
   boss?: BossSpawn;
+  /** stat multiplier for the AI's regular cats (bosses, summons and splits are unaffected); 1 = same as the player's */
+  unitMul?: { hp: number; dps: number };
 }
 
 export interface AiState {
@@ -68,5 +70,14 @@ export function aiStep(state: BattleState, ai: AiState, dtMs: number): void {
   }
   const strat = ai.cfg.strategy.length ? ai.cfg.strategy : DEFAULT_STRATEGY;
   const unitId = strat[ai.idx % strat.length];
-  if (spawn(state, ai.side, unitId)) ai.idx++;
+  const e = spawn(state, ai.side, unitId);
+  if (e) {
+    ai.idx++;
+    const m = ai.cfg.unitMul;
+    if (m) {
+      e.maxHp = Math.max(1, Math.round(e.maxHp * m.hp));
+      e.hp = e.maxHp;
+      e.dps = e.dps * m.dps;
+    }
+  }
 }

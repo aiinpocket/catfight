@@ -117,6 +117,7 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
       name: s.name,
       category: s.category,
       reward: s.reward,
+      powerTier: s.powerTier,
       ai: s.ai,
       boss: s.boss,
       unlocked: true,

@@ -14,7 +14,7 @@ import {
   type BattleState,
   spawnFree,
 } from '@catfight/engine';
-import { api, type Me, type MatchResultInput, ApiError } from '../api';
+import { api, stashPendingResult, type Me, type MatchResultInput, ApiError } from '../api';
 import { BattleScene } from './BattleScene';
 import { escapeHtml, QuestionFeed, QuizPanel } from './quiz';
 
@@ -187,6 +187,12 @@ export function runBattle(root: HTMLElement, setup: BattleSetup): Promise<{ outc
           break;
         } catch (e) {
           err = (e as Error).message;
+          if (e instanceof ApiError && e.status === 401) {
+            // session expired while playing: keep the result and send it after the next login
+            stashPendingResult(payload);
+            err = '登入已過期，這場戰績會在下次登入後補登';
+            break;
+          }
           if (e instanceof ApiError && e.status >= 400 && e.status < 500) break;
           await new Promise((res) => setTimeout(res, 1500 * (attempt + 1)));
         }
