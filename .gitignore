@@ -4,3 +4,5 @@ volumes/
 *.db
 .env
 data/questions/*.json
+data/pdf/
+data/*.xlsx
