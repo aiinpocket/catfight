@@ -83,7 +83,8 @@ export class ApiError extends Error {
 }
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  // only claim a JSON body when there is one: Fastify rejects an empty body sent as application/json
+  const headers: Record<string, string> = body === undefined ? {} : { 'Content-Type': 'application/json' };
   const t = getToken();
   if (t) headers.authorization = `Bearer ${t}`;
   const res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
