@@ -252,7 +252,7 @@ export function bossDef(n: number): UnitDef {
   const entry = BOSS_LIST[(n - 1) % BOSS_COUNT];
   const p = PROFILE[entry.profile];
   const t = (n - 1) / 99;
-  const baseHp = 260 + 2600 * t * t + 700 * t; // 260 -> ~3560
+  const baseHp = 420 + 2600 * t * t + 540 * t; // 420 -> ~3560
   const baseDps = 12 + 70 * t; // 12 -> 82
   const ability = bossAbility(entry.ability, n);
   const def: UnitDef = {

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { BALANCE, FIELD_LENGTH, TICK_MS, UNITS, type BattleEvent, type BattleState, type Entity, type Side, SMALL_UNIT_SCALE } from '@catfight/engine';
+import { ATTACK_INTERVAL, BALANCE, FIELD_LENGTH, TICK_MS, UNITS, unitDef, type BattleEvent, type BattleState, type Entity, type Side, SMALL_UNIT_SCALE } from '@catfight/engine';
 
 export interface BattleDriver {
   /** advance the game by one fixed tick */
@@ -24,6 +24,7 @@ interface SpriteRec {
   hurtUntil: number;
   /** melee lunge offset, decays each frame */
   lunge: number;
+  knock: number;
 }
 
 /** Renders the engine state with hit feedback: projectiles, lunges, damage numbers, beams, tower shake. */
@@ -31,6 +32,10 @@ export class BattleScene extends Phaser.Scene {
   private driver!: BattleDriver;
   private acc = 0;
   private sprites = new Map<number, SpriteRec>();
+  /** unit definitions by id (regular cats and bosses) */
+  private defOf(id: string) {
+    return UNITS[id] ?? unitDef(id);
+  }
   private towers!: Record<Side, Phaser.GameObjects.Image>;
   private towerHp!: Record<Side, Phaser.GameObjects.Graphics>;
   private towerText!: Record<Side, Phaser.GameObjects.Text>;
@@ -108,24 +113,30 @@ export class BattleScene extends Phaser.Scene {
         const a = this.sprites.get(ev.attackerId);
         const t = this.sprites.get(ev.targetId);
         const target = byId.get(ev.targetId);
-        const tx = t?.img.x ?? (target ? this.fxX(target.x) : null);
+        const tx = t ? this.centerX(t) : target ? this.fxX(target.x) : null;
         if (tx === null) continue;
-        const ty = this.groundY - (t?.img.displayHeight ?? 40) * 0.6;
+        const ty = this.groundY - (t?.img.displayHeight ?? 40) * 0.55;
+        const aside = byId.get(ev.attackerId)?.side ?? 'left';
+        const big = !!target && target.unitId.startsWith('boss_');
         if (ev.snipe && a) {
-          this.beams.push({ y: this.groundY - a.img.displayHeight * 0.55, x1: a.img.x, x2: tx, until: time + 220 });
+          this.beams.push({ y: this.groundY - a.img.displayHeight * 0.55, x1: this.centerX(a), x2: tx, until: time + 220 });
+          this.impact(tx, ty, 0xffe066, big);
         } else if (ev.ranged && a) {
-          this.shootProjectile(a.img.x, this.groundY - a.img.displayHeight * 0.6, tx, ty, byId.get(ev.attackerId)?.side ?? 'left');
+          this.shootProjectile(this.centerX(a), this.groundY - a.img.displayHeight * 0.6, tx, ty, aside, () => this.impact(tx, ty, aside === 'left' ? 0x9fd3ff : 0xffb3b3, big));
+          a.lunge = -8; // recoil
         } else if (a) {
-          a.lunge = 14;
+          a.lunge = 30; // strike: the whole body snaps into the target
+          this.impact(tx, ty, 0xffffff, big);
         }
         if (t) {
-          t.hurtUntil = time + 120;
-          this.tweens.add({ targets: t.img, scaleX: t.img.scaleX * 0.92, scaleY: t.img.scaleY * 1.06, duration: 60, yoyo: true });
+          t.hurtUntil = time + 140;
+          t.knock = 7;
+          this.tweens.add({ targets: t.img, scaleX: t.img.scaleX * 0.9, scaleY: t.img.scaleY * 1.08, duration: 70, yoyo: true });
         }
-        this.damageText(tx, ty - 10, Math.round(ev.amount), target?.side === 'left' ? '#ff6b6b' : '#ffe066');
+        this.damageText(tx, ty - 14, Math.round(ev.amount), target?.side === 'left' ? '#ff6b6b' : '#ffe066');
       } else if (ev.type === 'evade') {
         const t = this.sprites.get(ev.targetId);
-        if (t) this.damageText(t.img.x, this.groundY - t.img.displayHeight - 14, 'MISS', '#9fd3ff');
+        if (t) this.damageText(this.centerX(t), this.groundY - t.img.displayHeight - 14, 'MISS', '#9fd3ff');
       } else if (ev.type === 'towerHit' && ev.attackerId !== undefined) {
         const tower = this.towers[ev.side];
         this.tweens.add({ targets: tower, x: tower.x + (ev.side === 'left' ? -4 : 4), duration: 40, yoyo: true, repeat: 2 });
@@ -133,35 +144,65 @@ export class BattleScene extends Phaser.Scene {
         const a = this.sprites.get(ev.attackerId);
         const attacker = byId.get(ev.attackerId);
         if (a && attacker) {
-          if (attacker.range > 60) this.shootProjectile(a.img.x, this.groundY - a.img.displayHeight * 0.6, tower.x, this.groundY - tower.displayHeight * 0.5, attacker.side);
-          else a.lunge = 14;
+          const tx = tower.x + (ev.side === 'left' ? tower.displayWidth * 0.3 : -tower.displayWidth * 0.3);
+          const ty = this.groundY - tower.displayHeight * 0.45;
+          if (attacker.range > 60) {
+            this.shootProjectile(this.centerX(a), this.groundY - a.img.displayHeight * 0.6, tx, ty, attacker.side, () => this.impact(tx, ty, 0xffffff, false));
+            a.lunge = -8;
+          } else {
+            a.lunge = 30;
+            this.impact(tx, ty, 0xffffff, false);
+          }
         }
       } else if (ev.type === 'special') {
         const s = this.sprites.get(ev.entityId);
-        if (s) this.damageText(s.img.x, this.groundY - s.img.displayHeight - 16, ev.kind === 'lastStand' ? '復活！' : ev.kind === 'summon' ? '召喚！' : '狙擊！', '#ffe066');
+        if (s) this.damageText(this.centerX(s), this.groundY - s.img.displayHeight - 16, ev.kind === 'lastStand' ? '復活！' : ev.kind === 'summon' ? '召喚！' : '狙擊！', '#ffe066');
+      } else if (ev.type === 'spawn' && ev.unitId.startsWith('boss_')) {
+        this.cameras.main.shake(300, 0.006);
+        this.cameras.main.flash(250, 255, 224, 102, false);
       }
     }
   }
 
-  private shootProjectile(x1: number, y1: number, x2: number, y2: number, side: Side) {
-    const dot = this.add.circle(x1, y1, 4, side === 'left' ? 0x9fd3ff : 0xffb3b3).setDepth(65);
-    const trail = this.add.circle(x1, y1, 2, 0xffffff, 0.7).setDepth(64);
+  private shootProjectile(x1: number, y1: number, x2: number, y2: number, side: Side, onArrive?: () => void) {
+    const color = side === 'left' ? 0x9fd3ff : 0xffb3b3;
+    const angle = Phaser.Math.RadToDeg(Math.atan2(y2 - y1, x2 - x1));
+    const streak = this.add.ellipse(x1, y1, 22, 6, color, 0.9).setAngle(angle).setDepth(65);
+    const dot = this.add.circle(x1, y1, 4, 0xffffff).setDepth(66);
+    // muzzle flash
+    const flash = this.add.circle(x1, y1, 6, 0xffffff, 0.9).setDepth(66);
+    this.tweens.add({ targets: flash, scale: 2.2, alpha: 0, duration: 130, onComplete: () => flash.destroy() });
     this.tweens.add({
-      targets: [dot, trail],
+      targets: [streak, dot],
       x: x2,
       y: y2,
-      duration: 160,
+      duration: 200,
       ease: 'Linear',
       onComplete: () => {
+        streak.destroy();
         dot.destroy();
-        trail.destroy();
+        onArrive?.();
       },
     });
   }
 
+  /** expanding ring + spark burst at the point of impact */
+  private impact(x: number, y: number, color: number, big: boolean) {
+    const r = big ? 14 : 9;
+    const ring = this.add.circle(x, y, r, color, 0).setStrokeStyle(3, color, 0.95).setDepth(70);
+    this.tweens.add({ targets: ring, scale: big ? 2.4 : 1.9, alpha: 0, duration: 220, ease: 'Cubic.Out', onComplete: () => ring.destroy() });
+    const spark = this.add.star(x, y, 4, r * 0.35, r * 1.1, 0xffffff, 1).setDepth(71).setAngle(Phaser.Math.Between(0, 90));
+    this.tweens.add({ targets: spark, scale: big ? 1.8 : 1.4, angle: spark.angle + 45, alpha: 0, duration: 180, onComplete: () => spark.destroy() });
+  }
+
+  /** screen x of a sprite's body centre (sprites are anchored at their front edge) */
+  private centerX(s: SpriteRec) {
+    return s.img.getCenter().x ?? s.img.x;
+  }
+
   private damageText(x: number, y: number, text: string | number, color: string) {
     const t = this.add
-      .text(x + Phaser.Math.Between(-8, 8), y, String(text), { fontSize: '13px', fontStyle: 'bold', color, fontFamily: 'sans-serif', stroke: '#000000', strokeThickness: 3 })
+      .text(x + Phaser.Math.Between(-8, 8), y, String(text), { fontSize: '15px', fontStyle: 'bold', color, fontFamily: 'sans-serif', stroke: '#000000', strokeThickness: 3 })
       .setOrigin(0.5)
       .setDepth(80);
     this.tweens.add({ targets: t, y: y - 26, alpha: 0, duration: 650, ease: 'Cubic.Out', onComplete: () => t.destroy() });
@@ -179,11 +220,12 @@ export class BattleScene extends Phaser.Scene {
         const key = this.textures.exists(e.unitId) ? e.unitId : 'tank';
         // bosses keep the full sprite size; regular cats are smaller so future units have room to vary
         const scale = this.unitScale * (boss ? 1.6 : SMALL_UNIT_SCALE);
-        const img = this.add.image(this.fxX(e.x), this.groundY, key).setOrigin(0.5, 1).setScale(scale);
+        // anchor at the front edge (art has ~15% transparent padding): a melee pair stands nose to nose instead of overlapping
+        const img = this.add.image(this.fxX(e.x), this.groundY, key).setOrigin(e.side === 'left' ? 0.82 : 0.18, 1).setScale(scale);
         // boss art already faces left; regular sprites face right
         if (e.side === 'right' && !boss) img.setFlipX(true).setTint(0xffc9c9);
         if (e.side === 'left' && boss) img.setFlipX(true);
-        s = { img, hp: this.add.graphics(), hurtUntil: 0, lunge: 0 };
+        s = { img, hp: this.add.graphics(), hurtUntil: 0, lunge: 0, knock: 0 };
         if (boss) {
           s.label = this.add
             .text(img.x, 0, this.driver.bossName ?? 'BOSS', { fontSize: '11px', fontStyle: 'bold', color: '#ffe066', fontFamily: 'sans-serif', stroke: '#000000', strokeThickness: 3 })
@@ -211,15 +253,22 @@ export class BattleScene extends Phaser.Scene {
 
   private draw(e: Entity, s: SpriteRec, time: number, delta: number) {
     const boss = isBoss(e.unitId);
+    const def = this.defOf(e.unitId);
     const moving = !e.attacking;
-    const bob = moving && UNITS[e.unitId]?.speed !== 0 ? Math.abs(Math.sin(time / 90 + e.id)) * 6 : 0;
-    s.lunge = Math.max(0, s.lunge - delta * 0.12);
-    const lungeDir = e.side === 'left' ? 1 : -1;
-    const jitter = (e.id % 3) * 5;
-    s.img.setPosition(this.fxX(e.x) + lungeDir * s.lunge + (e.side === 'left' ? -jitter : jitter), this.groundY - bob);
+    const bob = moving && def?.speed !== 0 ? Math.abs(Math.sin(time / 90 + e.id)) * 6 : 0;
+    // strike (positive) or recoil (negative) decays back to rest; knockback pushes the victim away
+    s.lunge = s.lunge > 0 ? Math.max(0, s.lunge - delta * 0.09) : Math.min(0, s.lunge + delta * 0.06);
+    s.knock = Math.max(0, s.knock - delta * 0.05);
+    const dir = e.side === 'left' ? 1 : -1;
+    // wind-up: while a hit is charging, the cat pulls back and leans, then snaps forward on the hit event
+    const interval = def?.attackInterval ?? ATTACK_INTERVAL;
+    const windup = e.attacking && (def?.dps ?? 0) > 0 ? Phaser.Math.Clamp(1 - e.cooldown / interval, 0, 1) : 0;
+    const pull = windup * windup * (boss ? 10 : 7);
+    const jitter = (e.id % 3) * 4;
+    s.img.setPosition(this.fxX(e.x) + dir * (s.lunge - pull - s.knock) - dir * jitter, this.groundY - bob);
     s.img.setDepth(10 + (e.side === 'left' ? e.x : FIELD_LENGTH - e.x) / 100 + (boss ? 5 : 0));
-    // lean forward while attacking
-    s.img.setAngle(e.attacking ? lungeDir * 6 : 0);
+    const strike = Math.max(0, s.lunge) / 30;
+    s.img.setAngle(dir * (strike * 22 - windup * 12));
     if (time < s.hurtUntil) s.img.setTint(0xff4040);
     else if (e.special) s.img.setTint(0xffe066);
     else if (e.side === 'right' && !boss) s.img.setTint(0xffc9c9);
@@ -228,12 +277,13 @@ export class BattleScene extends Phaser.Scene {
     const w = boss ? 64 : 28;
     const h = s.img.displayHeight;
     const y = this.groundY - h - 10;
+    const cx = this.centerX(s);
     s.hp.clear();
     s.hp.setDepth(50);
-    s.hp.fillStyle(0x000000, 0.6).fillRect(s.img.x - w / 2, y, w, boss ? 7 : 5);
+    s.hp.fillStyle(0x000000, 0.6).fillRect(cx - w / 2, y, w, boss ? 7 : 5);
     const color = boss ? 0xffe066 : e.side === 'left' ? 0x3ddc84 : 0xff5a5f;
-    s.hp.fillStyle(color, 1).fillRect(s.img.x - w / 2, y, w * (e.hp / e.maxHp), boss ? 7 : 5);
-    if (s.label) s.label.setPosition(s.img.x, y - 2);
+    s.hp.fillStyle(color, 1).fillRect(cx - w / 2, y, w * (e.hp / e.maxHp), boss ? 7 : 5);
+    if (s.label) s.label.setPosition(cx, y - 2);
   }
 
   private drawTower(side: Side, hp: number) {
