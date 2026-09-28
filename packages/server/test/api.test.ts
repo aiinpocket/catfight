@@ -67,6 +67,15 @@ describe('categories, questions and stages', () => {
     expect(n).toBe(0);
   });
 
+  it('re-importing a corrected question updates its options and answer', async () => {
+    const n = await importBank(db, { category: { id: 'security', name: '安控', sortOrder: 2 }, questions: [{ text: '安控題', options: ['A', 'B', 'C', 'D2'], answerIndex: 3 }] });
+    expect(n).toBe(1);
+    const r = await db.query<{ options: string[]; answer_index: number }>("SELECT options, answer_index FROM questions WHERE category = 'security' AND text = '安控題'");
+    expect(r.rows[0].options).toEqual(['A', 'B', 'C', 'D2']);
+    expect(r.rows[0].answer_index).toBe(3);
+    await importBank(db, { category: { id: 'security', name: '安控', sortOrder: 2 }, questions: [{ text: '安控題', options: ['A', 'B', 'C', 'D'], answerIndex: 1 }] });
+  });
+
   it('returns random questions with shuffled options and a consistent answer index', async () => {
     const r = await app.inject({ method: 'GET', url: '/api/questions?category=finance_basics&limit=12', headers: H(tokenA) });
     expect(r.statusCode).toBe(200);

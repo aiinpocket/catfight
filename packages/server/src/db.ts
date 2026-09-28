@@ -174,7 +174,13 @@ export async function importBank(db: DB, bank: QuestionBankFile): Promise<number
     for (const it of bank.questions) {
       const r = await q(
         `INSERT INTO questions (category, text, options, answer_index, explanation, source) VALUES ($1, $2, $3, $4, $5, $6)
-         ON CONFLICT (category, text) DO NOTHING`,
+         ON CONFLICT (category, text) DO UPDATE
+           SET options = EXCLUDED.options, answer_index = EXCLUDED.answer_index,
+               explanation = EXCLUDED.explanation, source = EXCLUDED.source
+           WHERE questions.options IS DISTINCT FROM EXCLUDED.options
+              OR questions.answer_index IS DISTINCT FROM EXCLUDED.answer_index
+              OR questions.explanation IS DISTINCT FROM EXCLUDED.explanation
+              OR questions.source IS DISTINCT FROM EXCLUDED.source`,
         [bank.category.id, it.text, JSON.stringify(it.options), it.answerIndex, it.explanation ?? null, it.source ?? null],
       );
       n += r.rowCount;

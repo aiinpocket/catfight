@@ -46,7 +46,7 @@ export async function importQuestionDir(db: DB, dir: string) {
         continue;
       }
       const n = await importBank(db, bank);
-      console.log(`questions: ${f} -> ${bank.category.id} (${bank.category.name}) +${n} new of ${bank.questions.length}`);
+      console.log(`questions: ${f} -> ${bank.category.id} (${bank.category.name}) ${n} new/updated of ${bank.questions.length}`);
       total += n;
     } catch (e) {
       console.warn(`questions: failed ${f}: ${(e as Error).message}`);
