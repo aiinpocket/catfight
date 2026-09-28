@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { abilityText, aiStep, BOSS_LIST, bossDef, buildStages, createAi, createBattle, spawn, spawnFree, stageAi, step, TICK_MS, unitDef } from '../src/index.js';
 
+/** stage number of a boss by name (the list is ordered by historical exit year) */
+const N = (name: string) => BOSS_LIST.findIndex((b) => b.name === name) + 1;
+
 describe('boss table', () => {
   it('has 100 unique warlords with a description each', () => {
     expect(BOSS_LIST).toHaveLength(100);
@@ -18,8 +21,8 @@ describe('boss table', () => {
   it('stages carry their boss and the AI spawns it at the configured time', () => {
     const st = buildStages([{ id: 'a', name: 'A' }]);
     expect(st).toHaveLength(100);
-    expect(st[6].boss.name).toBe('真田幸村喵');
-    expect(st[7].boss.name).toBe('雜賀孫市喵');
+    expect(st[N('真田幸村喵') - 1].boss.name).toBe('真田幸村喵');
+    expect(st[N('雜賀孫市喵') - 1].boss.name).toBe('雜賀孫市喵');
     const s = createBattle();
     const ai = createAi('right', stageAi(1));
     const at = stageAi(1).boss!.atMs;
@@ -41,7 +44,7 @@ describe('boss abilities', () => {
 
   it('雜賀 snipe: never moves, every 10 s hits every enemy ahead but not the tower', () => {
     const s = createBattle();
-    const boss = at(s, 'boss_8', 900); // 雜賀孫市喵 (stage 8)
+    const boss = at(s, `boss_${N('雜賀孫市喵')}`, 900); // 雜賀孫市喵
     s.score.left = 120;
     // scholars do not attack, so the fragile boss survives the full 10 s
     const a = spawn(s, 'left', 'scholar')!;
@@ -51,7 +54,7 @@ describe('boss abilities', () => {
     const x0 = boss.x;
     for (let i = 0; i < 20 * 10; i++) step(s); // 10 s
     expect(boss.x).toBe(x0);
-    const dmg = (bossDef(8).boss as { dmg: number }).dmg;
+    const dmg = (bossDef(N('雜賀孫市喵')).boss as { dmg: number }).dmg;
     expect(a.hp).toBeCloseTo(80 - dmg, 3);
     expect(b.hp).toBeLessThanOrEqual(80 - dmg); // b also walks into the boss's normal range
     expect(s.towerHp.left).toBe(800);
@@ -59,7 +62,7 @@ describe('boss abilities', () => {
 
   it('真田 rampUp: damage grows with consecutive hits on one target and resets on a new one', () => {
     const s = createBattle();
-    const boss = at(s, 'boss_7', 520); // 真田幸村喵
+    const boss = at(s, `boss_${N('真田幸村喵')}`, 520); // 真田幸村喵
     s.score.left = 60;
     const t1 = spawn(s, 'left', 'tank')!;
     t1.x = 500;
@@ -79,27 +82,27 @@ describe('boss abilities', () => {
   });
 
   it('armor, evade, regen and lastStand keep bosses alive longer', () => {
-    // 德川家康 armor (stage 3)
+    // 德川家康 armor
     let s = createBattle();
-    let boss = at(s, 'boss_3', 520);
+    let boss = at(s, `boss_${N('德川家康喵')}`, 520);
     s.score.left = 40;
     spawn(s, 'left', 'archer')!.x = 440; // 80 away: inside archer reach (105)
     step(s);
-    const armor = (bossDef(3).boss as { frac: number }).frac;
+    const armor = (bossDef(N('德川家康喵')).boss as { frac: number }).frac;
     expect(boss.maxHp - boss.hp).toBeCloseTo(40 * (1 - armor), 3);
 
-    // 竹中半兵衛 evade (stage 19): every 3rd hit ignored
+    // 竹中半兵衛 evade: every 3rd hit ignored
     s = createBattle();
-    boss = at(s, 'boss_19', 520);
+    boss = at(s, `boss_${N('竹中半兵衛喵')}`, 520);
     s.score.left = 40;
     spawn(s, 'left', 'archer')!.x = 440; // 80 away: inside archer reach (105)
     for (let i = 0; i < 20 * 3; i++) step(s); // 3 hits at t=0,1,2
     expect(boss.hitsTaken).toBe(3);
     expect(boss.maxHp - boss.hp).toBeCloseTo(80, 3);
 
-    // 淺井長政 lastStand (stage 25)
+    // 淺井長政 lastStand
     s = createBattle();
-    boss = at(s, 'boss_25', 520);
+    boss = at(s, `boss_${N('淺井長政喵')}`, 520);
     boss.hp = 1;
     s.score.left = 40;
     spawn(s, 'left', 'archer')!.x = 440; // 80 away: inside archer reach (105)
@@ -110,33 +113,33 @@ describe('boss abilities', () => {
   });
 
   it('summon and split create free allies, scoreDrain steals score, knockback pushes', () => {
-    // 豐臣秀吉 summon (stage 2)
+    // 豐臣秀吉 summon
     let s = createBattle();
-    at(s, 'boss_2', 900);
-    const every = (bossDef(2).boss as { everySec: number }).everySec;
+    at(s, `boss_${N('豐臣秀吉喵')}`, 900);
+    const { everySec: every, unitId: summonId } = bossDef(N('豐臣秀吉喵')).boss as { everySec: number; unitId: string };
     for (let i = 0; i < 20 * every + 1; i++) step(s);
-    expect(s.entities.filter((e) => e.side === 'right' && e.unitId === 'tank')).toHaveLength(1);
+    expect(s.entities.filter((e) => e.side === 'right' && e.unitId === summonId)).toHaveLength(1);
 
-    // 北條氏康 split (stage 12)
+    // 北條氏康 split
     s = createBattle();
-    const b = at(s, 'boss_12', 520);
+    const b = at(s, `boss_${N('北條氏康喵')}`, 520);
     b.hp = 1;
     s.score.left = 40;
     spawn(s, 'left', 'archer')!.x = 440; // 80 away: inside archer reach (105)
     step(s);
     expect(s.entities.filter((e) => e.side === 'right' && e.unitId === 'tank')).toHaveLength(2);
 
-    // 黑田官兵衛 scoreDrain (stage 18)
+    // 黑田官兵衛 scoreDrain
     s = createBattle();
-    at(s, 'boss_18', 520);
+    at(s, `boss_${N('黑田官兵衛喵')}`, 520);
     s.score.left = 100;
     spawn(s, 'left', 'tank')!.x = 500;
     step(s);
-    expect(s.score.left).toBe(70 - (bossDef(18).boss as { amount: number }).amount);
+    expect(s.score.left).toBe(70 - (bossDef(N('黑田官兵衛喵')).boss as { amount: number }).amount);
 
-    // 島津義弘 knockback (stage 11)
+    // 島津義弘 knockback
     s = createBattle();
-    at(s, 'boss_11', 520);
+    at(s, `boss_${N('島津義弘喵')}`, 520);
     s.score.left = 30;
     const t = spawn(s, 'left', 'tank')!;
     t.x = 500;
@@ -145,29 +148,29 @@ describe('boss abilities', () => {
   });
 
   it('slowAura and towerBuster and execute behave', () => {
-    // 今川義元 slowAura (stage 13): player archer hits fewer times in 5 s
+    // 今川義元 slowAura: player archer hits fewer times in 5 s
     let s = createBattle();
-    at(s, 'boss_13', 900);
+    at(s, `boss_${N('今川義元喵')}`, 900);
     s.score.left = 40;
     spawn(s, 'left', 'archer')!.x = 800; // boss at 900 is in range
-    const boss = s.entities.find((e) => e.unitId === 'boss_13')!;
+    const boss = s.entities.find((e) => e.unitId === `boss_${N('今川義元喵')}`)!;
     for (let i = 0; i < 20 * 5; i++) step(s);
-    const frac = (bossDef(13).boss as { frac: number }).frac;
+    const frac = (bossDef(N('今川義元喵')).boss as { frac: number }).frac;
     const hits = Math.round((boss.maxHp - boss.hp) / 40);
     expect(hits).toBeLessThan(5);
     expect(hits).toBeGreaterThanOrEqual(Math.floor(1 + 4 * (1 - frac)) - 1);
 
-    // 明智光秀 towerBuster (stage 14)
+    // 明智光秀 towerBuster
     s = createBattle();
-    at(s, 'boss_14', 30);
+    at(s, `boss_${N('明智光秀喵')}`, 30);
     step(s);
-    const d14 = bossDef(14);
+    const d14 = bossDef(N('明智光秀喵'));
     const mult = (d14.boss as { mult: number }).mult;
     expect(800 - s.towerHp.left).toBeCloseTo(d14.dps * (d14.attackInterval ?? 1) * mult, 3);
 
-    // 加藤清正 execute (stage 20)
+    // 加藤清正 execute
     s = createBattle();
-    at(s, 'boss_20', 520);
+    at(s, `boss_${N('加藤清正喵')}`, 520);
     s.score.left = 30;
     const t = spawn(s, 'left', 'tank')!;
     t.x = 500;

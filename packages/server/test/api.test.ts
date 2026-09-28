@@ -135,9 +135,13 @@ describe('categories, questions and stages', () => {
     expect(st.length).toBe(100);
     expect(st.map((s) => s.category).slice(0, 4)).toEqual(['finance_basics', 'security', 'finance_basics', 'security']);
     expect(st[20].ai.scorePerSec).toBeGreaterThan(st[0].ai.scorePerSec);
-    expect(st[6].boss.name).toBe('真田幸村喵');
-    expect(st[6].ai.boss.unitId).toBe('boss_7');
-    expect(st[7].boss.desc).toContain('貫穿');
+    // bosses are ordered by historical exit year: 太田道灌 (d. 1486) opens, 真田信之 (d. 1658) closes
+    expect(st[0].boss.name).toBe('太田道灌喵');
+    expect(st[0].ai.boss.unitId).toBe('boss_1');
+    expect(st[99].boss.name).toBe('真田信之喵');
+    const saika = st.findIndex((s) => s.boss.name === '雜賀孫市喵');
+    expect(st[saika].boss.desc).toContain('貫穿');
+    expect(st[saika].ai.boss.unitId).toBe(`boss_${saika + 1}`);
     expect(st.every((s) => s.unlocked)).toBe(true);
   });
 });
