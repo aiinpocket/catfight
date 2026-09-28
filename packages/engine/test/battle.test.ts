@@ -88,8 +88,8 @@ describe('combat', () => {
     s.score = { left: 40, right: 30 };
     spawn(s, 'left', 'archer');
     spawn(s, 'right', 'tank');
-    // closing speed 80/s, archer opens fire at 150 => ~10.6 s; tank needs ~3 s more to reach melee
-    for (let i = 0; i < 20 * 12; i++) step(s);
+    // closing speed 80/s, archer opens fire at 105 => ~11.2 s; tank needs ~1 s more to reach melee
+    for (let i = 0; i < 232; i++) step(s); // 11.6 s
     const tank = s.entities.find((e) => e.side === 'right')!;
     const archer = s.entities.find((e) => e.side === 'left')!;
     expect(tank.hp).toBeLessThan(UNITS.tank.hp);

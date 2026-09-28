@@ -83,7 +83,7 @@ describe('boss abilities', () => {
     let s = createBattle();
     let boss = at(s, 'boss_3', 520);
     s.score.left = 40;
-    spawn(s, 'left', 'archer')!.x = 400;
+    spawn(s, 'left', 'archer')!.x = 440; // 80 away: inside archer reach (105)
     step(s);
     const armor = (bossDef(3).boss as { frac: number }).frac;
     expect(boss.maxHp - boss.hp).toBeCloseTo(40 * (1 - armor), 3);
@@ -92,7 +92,7 @@ describe('boss abilities', () => {
     s = createBattle();
     boss = at(s, 'boss_19', 520);
     s.score.left = 40;
-    spawn(s, 'left', 'archer')!.x = 400;
+    spawn(s, 'left', 'archer')!.x = 440; // 80 away: inside archer reach (105)
     for (let i = 0; i < 20 * 3; i++) step(s); // 3 hits at t=0,1,2
     expect(boss.hitsTaken).toBe(3);
     expect(boss.maxHp - boss.hp).toBeCloseTo(80, 3);
@@ -102,7 +102,7 @@ describe('boss abilities', () => {
     boss = at(s, 'boss_25', 520);
     boss.hp = 1;
     s.score.left = 40;
-    spawn(s, 'left', 'archer')!.x = 400;
+    spawn(s, 'left', 'archer')!.x = 440; // 80 away: inside archer reach (105)
     step(s);
     expect(boss.revived).toBe(true);
     expect(boss.hp).toBeGreaterThan(1);
@@ -122,7 +122,7 @@ describe('boss abilities', () => {
     const b = at(s, 'boss_12', 520);
     b.hp = 1;
     s.score.left = 40;
-    spawn(s, 'left', 'archer')!.x = 400;
+    spawn(s, 'left', 'archer')!.x = 440; // 80 away: inside archer reach (105)
     step(s);
     expect(s.entities.filter((e) => e.side === 'right' && e.unitId === 'tank')).toHaveLength(2);
 

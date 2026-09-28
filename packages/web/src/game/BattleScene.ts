@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { BALANCE, FIELD_LENGTH, TICK_MS, UNITS, type BattleEvent, type BattleState, type Entity, type Side } from '@catfight/engine';
+import { BALANCE, FIELD_LENGTH, TICK_MS, UNITS, type BattleEvent, type BattleState, type Entity, type Side, SMALL_UNIT_SCALE } from '@catfight/engine';
 
 export interface BattleDriver {
   /** advance the game by one fixed tick */
@@ -177,7 +177,8 @@ export class BattleScene extends Phaser.Scene {
       if (!s) {
         const boss = isBoss(e.unitId);
         const key = this.textures.exists(e.unitId) ? e.unitId : 'tank';
-        const scale = this.unitScale * (boss ? 1.6 : 1);
+        // bosses keep the full sprite size; regular cats are smaller so future units have room to vary
+        const scale = this.unitScale * (boss ? 1.6 : SMALL_UNIT_SCALE);
         const img = this.add.image(this.fxX(e.x), this.groundY, key).setOrigin(0.5, 1).setScale(scale);
         // boss art already faces left; regular sprites face right
         if (e.side === 'right' && !boss) img.setFlipX(true).setTint(0xffc9c9);
@@ -224,7 +225,7 @@ export class BattleScene extends Phaser.Scene {
     else if (e.side === 'right' && !boss) s.img.setTint(0xffc9c9);
     else s.img.clearTint();
 
-    const w = boss ? 64 : 36;
+    const w = boss ? 64 : 28;
     const h = s.img.displayHeight;
     const y = this.groundY - h - 10;
     s.hp.clear();

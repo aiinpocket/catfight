@@ -16,7 +16,7 @@ describe('upgrade maths', () => {
     expect(effectiveStats(UNITS.tank, L('tank', 'hp', 5)).hp).toBe(450);
     expect(effectiveStats(UNITS.archer, L('archer', 'atk', 10)).dps).toBeCloseTo(80);
     expect(effectiveStats(UNITS.mage, L('mage', 'special', 7)).dps).toBe(32);
-    expect(effectiveStats(UNITS.archer, L('archer', 'special', 4)).range).toBe(158);
+    expect(effectiveStats(UNITS.archer, L('archer', 'special', 4)).range).toBe(113);
   });
 });
 
@@ -39,7 +39,7 @@ describe('upgrade effects in battle', () => {
     for (const s of [plain, up]) {
       s.score = { left: 40, right: 30 };
       spawn(s, 'left', 'archer')!.x = 500;
-      spawn(s, 'right', 'tank')!.x = 665; // 165 away: inside 170 (upgraded), outside 150
+      spawn(s, 'right', 'tank')!.x = 615; // 115 away: inside 125 (upgraded), outside 105
       step(s);
     }
     expect(plain.entities[1].hp).toBe(300);
