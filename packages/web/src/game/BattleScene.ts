@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { ATTACK_INTERVAL, BALANCE, FIELD_LENGTH, TICK_MS, UNITS, unitDef, type BattleEvent, type BattleState, type Entity, type Side, SMALL_UNIT_SCALE } from '@catfight/engine';
+import { BossFx, bossStyle, rampColor, type BossStyle } from './bossFx';
 
 /** boss sprite size relative to a regular cat */
 const BOSS_SIZE_MUL = 1.5;
@@ -32,6 +33,12 @@ interface SpriteRec {
   base: number;
   /** ms timestamp of the spawn pop-in */
   spawnAt: number;
+  /** passive ability aura (bosses only) */
+  aura?: Phaser.GameObjects.Graphics;
+  /** last entity this attacker hit (charge bosses flash on a fresh target) */
+  lastTarget: number | null;
+  /** next time a periodic ambient effect (heal sparkles) may play */
+  nextFx: number;
 }
 
 /** Renders the engine state with hit feedback: projectiles, lunges, damage numbers, beams, tower shake. */
@@ -51,6 +58,7 @@ export class BattleScene extends Phaser.Scene {
   private groundY = 0;
   private unitScale = 1;
   private beams: { y: number; x1: number; x2: number; until: number }[] = [];
+  private bossFx!: BossFx;
 
   constructor() {
     super('battle');
@@ -88,6 +96,12 @@ export class BattleScene extends Phaser.Scene {
       right: this.add.text(width - this.padX + 10, 58, '', style).setOrigin(0.5, 0).setDepth(61),
     };
     this.fx = this.add.graphics().setDepth(70);
+    this.bossFx = new BossFx({
+      scene: this,
+      groundY: this.groundY,
+      impact: (x, y, c, big) => this.impact(x, y, c, big),
+      damageText: (x, y, t, c) => this.damageText(x, y, t, c),
+    });
     this.sprites.clear();
     this.scale.on('resize', () => this.scene.restart({ driver: this.driver }));
   }
@@ -115,6 +129,8 @@ export class BattleScene extends Phaser.Scene {
   private handleEvents(events: BattleEvent[], time: number) {
     const st = this.driver.state;
     const byId = new Map(st.entities.map((e) => [e.id, e]));
+    // a piercing boss hits several targets per swing: draw its swing once per batch
+    const pierceDrawn = new Set<number>();
     for (const ev of events) {
       if (ev.type === 'hit') {
         const a = this.sprites.get(ev.attackerId);
@@ -123,11 +139,16 @@ export class BattleScene extends Phaser.Scene {
         const tx = t ? this.centerX(t) : target ? this.fxX(target.x) : null;
         if (tx === null) continue;
         const ty = this.groundY - (t?.img.displayHeight ?? 40) * 0.55;
-        const aside = byId.get(ev.attackerId)?.side ?? 'left';
+        const attacker = byId.get(ev.attackerId);
+        const aside = attacker?.side ?? 'left';
         const big = !!target && target.unitId.startsWith('boss_');
+        const style = attacker ? bossStyle(attacker.unitId) : null;
         if (ev.snipe && a) {
           this.beams.push({ y: this.groundY - a.img.displayHeight * 0.55, x1: this.centerX(a), x2: tx, until: time + 220 });
           this.impact(tx, ty, 0xffe066, big);
+          a.lunge = -12;
+        } else if (style && a && attacker) {
+          this.bossHit(a, attacker, style, ev.targetId, target, tx, ty, big, pierceDrawn);
         } else if (ev.ranged && a) {
           this.shootProjectile(this.centerX(a), this.groundY - a.img.displayHeight * 0.6, tx, ty, aside, () => this.impact(tx, ty, aside === 'left' ? 0x9fd3ff : 0xffb3b3, big));
           a.lunge = -8; // recoil
@@ -139,12 +160,22 @@ export class BattleScene extends Phaser.Scene {
         }
         if (t) {
           t.hurtUntil = time + 140;
-          t.knock = byId.get(ev.attackerId)?.unitId.startsWith('boss_') ? 14 : 7;
+          t.knock = Math.max(t.knock, style ? (style.kind === 'knockback' ? 22 : 14) : 7);
+          // armored bosses show the hit glancing off a shield
+          if (target && bossStyle(target.unitId)?.kind === 'armor') this.bossFx.shieldFlash(tx, ty, target.side === 'left' ? 1 : -1);
         }
         this.damageText(tx, ty - 14, Math.round(ev.amount), target?.side === 'left' ? '#ff6b6b' : '#ffe066');
       } else if (ev.type === 'evade') {
         const t = this.sprites.get(ev.targetId);
-        if (t) this.damageText(this.centerX(t), this.groundY - t.img.displayHeight - 14, 'MISS', '#9fd3ff');
+        if (t) {
+          this.damageText(this.centerX(t), this.groundY - t.img.displayHeight - 14, 'MISS', '#9fd3ff');
+          const te = byId.get(ev.targetId);
+          if (te && isBoss(te.unitId)) {
+            // the boss blinks backwards, leaving a pale ghost where the blow landed
+            this.bossFx.afterimage(t.img, 0x9fd3ff);
+            t.knock = 18;
+          }
+        }
       } else if (ev.type === 'towerHit' && ev.attackerId !== undefined) {
         const tower = this.towers[ev.side];
         this.tweens.add({ targets: tower, x: tower.x + (ev.side === 'left' ? -4 : 4), duration: 40, yoyo: true, repeat: 2 });
@@ -154,22 +185,46 @@ export class BattleScene extends Phaser.Scene {
         if (a && attacker) {
           const tx = tower.x + (ev.side === 'left' ? tower.displayWidth * 0.3 : -tower.displayWidth * 0.3);
           const ty = this.groundY - tower.displayHeight * 0.45;
-          const abig = attacker.unitId.startsWith('boss_');
-          if (attacker.range > 60) {
+          const style = bossStyle(attacker.unitId);
+          if (style) {
+            this.bossHit(a, attacker, style, -1, null, tx, ty, false, pierceDrawn);
+            if (style.kind === 'towerBuster') {
+              this.cameras.main.shake(220, 0.009);
+              this.bossFx.shockwave(tx, 0xff9a3c, 1.4);
+              this.damageText(tx, ty - 34, '破城！', '#ff9a3c');
+            }
+          } else if (attacker.range > 60) {
             this.shootProjectile(this.centerX(a), this.groundY - a.img.displayHeight * 0.6, tx, ty, attacker.side, () => this.impact(tx, ty, 0xffffff, false));
             a.lunge = -8;
           } else {
-            a.lunge = this.strikeLen(abig);
-            this.slash(tx, ty, attacker.side, abig);
+            a.lunge = this.strikeLen(false);
+            this.slash(tx, ty, attacker.side, false);
             this.impact(tx, ty, 0xffffff, false);
           }
         }
       } else if (ev.type === 'special') {
         const s = this.sprites.get(ev.entityId);
-        if (s) this.damageText(this.centerX(s), this.groundY - s.img.displayHeight - 16, ev.kind === 'lastStand' ? '復活！' : ev.kind === 'summon' ? '召喚！' : '狙擊！', '#ffe066');
+        if (s) {
+          const cx = this.centerX(s);
+          this.damageText(cx, this.groundY - s.img.displayHeight - 16, ev.kind === 'lastStand' ? '復活！' : ev.kind === 'summon' ? '召喚！' : '狙擊！', '#ffe066');
+          if (ev.kind === 'summon') this.bossFx.magicCircle(cx);
+          if (ev.kind === 'lastStand') this.bossFx.revivePillar(cx);
+          if (ev.kind === 'snipe') {
+            s.lunge = -12;
+            this.cameras.main.shake(120, 0.003);
+          }
+        }
+      } else if (ev.type === 'death' && ev.unitId.startsWith('boss_')) {
+        const s = this.sprites.get(ev.entityId);
+        if (s) {
+          const cx = this.centerX(s);
+          this.bossFx.shockwave(cx, bossStyle(ev.unitId)?.kind === 'split' ? 0xffe066 : 0xffffff, 1.3);
+          this.impact(cx, this.groundY - s.img.displayHeight * 0.5, 0xffffff, true);
+        }
       } else if (ev.type === 'spawn' && ev.unitId.startsWith('boss_')) {
+        // a short shake and a soft gold tint only on the battlefield canvas; the quiz panel below is untouched
         this.cameras.main.shake(300, 0.006);
-        this.cameras.main.flash(250, 255, 224, 102, false);
+        this.cameras.main.flash(200, 255, 224, 102, false);
       }
     }
   }
@@ -196,10 +251,67 @@ export class BattleScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * A boss's own attack. Motion follows its stat profile (melee swing, tanky stomp, fast double-cut, ranged arrow,
+   * artillery lob); its ability adds flavour (stack colours, charge streaks, life drain, coins, push waves, execute mark).
+   */
+  private bossHit(a: SpriteRec, attacker: Entity, style: BossStyle, targetId: number, target: Entity | null | undefined, tx: number, ty: number, big: boolean, pierceDrawn: Set<number>) {
+    const dir: 1 | -1 = attacker.side === 'left' ? 1 : -1;
+    const kind = style.kind;
+    const enraged = kind === 'enrage' && attacker.hp / attacker.maxHp < (style.ability as { below: number }).below;
+    const color = kind === 'rampUp' ? rampColor(attacker.stacks) : enraged ? 0xff2d2d : kind === 'berserk' && attacker.hp / attacker.maxHp < 0.5 ? 0xff9a3c : 0xffe066;
+    const ax = this.centerX(a);
+    const ay = this.groundY - a.img.displayHeight * 0.55;
+    const drawSwing = kind !== 'pierce' || !pierceDrawn.has(attacker.id);
+    pierceDrawn.add(attacker.id);
+    switch (style.profile) {
+      case 'melee':
+        a.lunge = 42;
+        if (drawSwing) this.slash(tx, ty, attacker.side, true, color, kind === 'pierce' ? 1.5 : 1);
+        this.impact(tx, ty, color, big);
+        break;
+      case 'tanky':
+        // the wind-up already lifted the body; the hit is the slam
+        a.lunge = 12;
+        this.bossFx.shockwave(tx, color, 1.2);
+        this.cameras.main.shake(110, 0.004);
+        this.impact(tx, ty, color, true);
+        break;
+      case 'fast':
+        a.lunge = 54;
+        this.bossFx.afterimage(a.img);
+        if (drawSwing) this.bossFx.crossSlash(tx, ty, color, 1.2);
+        this.impact(tx, ty, color, big);
+        break;
+      case 'ranged':
+        a.lunge = -10;
+        this.bossFx.arrow(ax + dir * 10, ay, tx, ty, color, () => this.impact(tx, ty, color, big));
+        break;
+      case 'artillery':
+        a.lunge = -14;
+        this.bossFx.lob(ax + dir * 10, ay - 6, tx, ty);
+        break;
+    }
+    // ability flavour
+    if (kind === 'rampUp' && attacker.stacks >= 2) this.damageText(tx, ty - 32, `×${attacker.stacks}`, '#ff9a3c');
+    if (kind === 'charge' && a.lastTarget !== targetId && targetId >= 0) {
+      this.bossFx.speedLines(ax - dir * a.img.displayWidth * 0.3, ay, dir, 0xffe066);
+      this.bossFx.afterimage(a.img, 0xffe066);
+      this.cameras.main.shake(90, 0.003);
+    }
+    a.lastTarget = targetId;
+    if (kind === 'lifesteal') this.bossFx.drain(tx, ty, ax, ay);
+    if (kind === 'scoreDrain' && targetId >= 0) this.bossFx.coin(tx, ty);
+    if (kind === 'knockback') this.bossFx.pushWave(tx, ty, dir);
+    if (kind === 'execute' && targetId >= 0 && !target) this.bossFx.executeMark(tx, ty);
+  }
+
   /** expanding ring + spark burst at the point of impact */
   private impact(x: number, y: number, color: number, big: boolean) {
     const r = big ? 14 : 9;
-    const ring = this.add.circle(x, y, r, color, 0).setStrokeStyle(3, color, 0.95).setDepth(70);
+    const ring = this.add.circle(x, y, r, color, 0).setStrokeStyle(3, color, 0.95).setDepth(70).setBlendMode(Phaser.BlendModes.ADD);
+    const glow = this.add.circle(x, y, r * 1.6, color, 0.35).setDepth(69).setBlendMode(Phaser.BlendModes.ADD);
+    this.tweens.add({ targets: glow, scale: big ? 2 : 1.6, alpha: 0, duration: 260, ease: 'Cubic.Out', onComplete: () => glow.destroy() });
     this.tweens.add({ targets: ring, scale: big ? 2.4 : 1.9, alpha: 0, duration: 220, ease: 'Cubic.Out', onComplete: () => ring.destroy() });
     const spark = this.add.star(x, y, 4, r * 0.35, r * 1.1, 0xffffff, 1).setDepth(71).setAngle(Phaser.Math.Between(0, 90));
     this.tweens.add({ targets: spark, scale: big ? 1.8 : 1.4, angle: spark.angle + 45, alpha: 0, duration: 180, onComplete: () => spark.destroy() });
@@ -211,15 +323,15 @@ export class BattleScene extends Phaser.Scene {
   }
 
   /** a weapon-swing arc in front of the target, drawn in the attacker's direction */
-  private slash(x: number, y: number, side: Side, boss: boolean) {
-    const r = boss ? 32 : 22;
-    const g = this.add.graphics().setDepth(72);
+  private slash(x: number, y: number, side: Side, boss: boolean, inner = 0xffe066, size = 1) {
+    const r = (boss ? 32 : 22) * size;
+    const g = this.add.graphics().setDepth(72).setBlendMode(Phaser.BlendModes.ADD);
     const dir = side === 'left' ? 1 : -1;
     // arc sweeping from above to below the impact point, bulging toward the target
     const start = dir === 1 ? -Math.PI * 0.45 : Math.PI * 0.55;
     const end = dir === 1 ? Math.PI * 0.45 : Math.PI * 1.45;
     g.lineStyle(boss ? 9 : 5, 0xffffff, 0.95).beginPath().arc(x - dir * r * 0.4, y, r, start, end, false).strokePath();
-    g.lineStyle(boss ? 4 : 2, 0xffe066, 0.9).beginPath().arc(x - dir * r * 0.4, y, r * 0.8, start, end, false).strokePath();
+    g.lineStyle(boss ? 4 : 2, inner, 0.9).beginPath().arc(x - dir * r * 0.4, y, r * 0.8, start, end, false).strokePath();
     this.tweens.add({ targets: g, alpha: 0, scaleX: 1.25, scaleY: 1.25, duration: boss ? 240 : 170, ease: 'Cubic.Out', onComplete: () => g.destroy() });
   }
 
@@ -253,8 +365,9 @@ export class BattleScene extends Phaser.Scene {
         // boss art already faces left; regular sprites face right
         if (e.side === 'right' && !boss) img.setFlipX(true).setTint(0xffc9c9);
         if (e.side === 'left' && boss) img.setFlipX(true);
-        s = { img, hp: this.add.graphics(), hurtUntil: 0, lunge: 0, knock: 0, base: scale, spawnAt: boss ? this.time.now : 0 };
+        s = { img, hp: this.add.graphics(), hurtUntil: 0, lunge: 0, knock: 0, base: scale, spawnAt: boss ? this.time.now : 0, lastTarget: null, nextFx: 0 };
         if (boss) {
+          s.aura = this.add.graphics().setDepth(9);
           s.label = this.add
             .text(img.x, 0, this.driver.bossName ?? 'BOSS', { fontSize: '11px', fontStyle: 'bold', color: '#ffe066', fontFamily: 'sans-serif', stroke: '#000000', strokeThickness: 3 })
             .setOrigin(0.5, 1)
@@ -270,6 +383,7 @@ export class BattleScene extends Phaser.Scene {
         this.tweens.add({ targets: s.img, alpha: 0, y: s.img.y - 20, angle: 25, duration: 300, onComplete: () => s.img.destroy() });
         s.hp.destroy();
         s.label?.destroy();
+        s.aura?.destroy();
         this.sprites.delete(id);
       }
     }
@@ -283,16 +397,20 @@ export class BattleScene extends Phaser.Scene {
     const def = this.defOf(e.unitId);
     const moving = !e.attacking;
     const bob = moving && def?.speed !== 0 ? Math.abs(Math.sin(time / 90 + e.id)) * 6 : 0;
+    const style = boss ? bossStyle(e.unitId) : null;
     // strike (positive) or recoil (negative) decays back to rest; knockback pushes the victim away
-    s.lunge = s.lunge > 0 ? Math.max(0, s.lunge - delta * 0.09) : Math.min(0, s.lunge + delta * 0.06);
+    const decay = style?.profile === 'fast' ? 0.16 : 0.09;
+    s.lunge = s.lunge > 0 ? Math.max(0, s.lunge - delta * decay) : Math.min(0, s.lunge + delta * 0.06);
     s.knock = Math.max(0, s.knock - delta * 0.05);
     const dir = e.side === 'left' ? 1 : -1;
     // wind-up: while a hit is charging, the cat pulls back and leans, then snaps forward on the hit event
     const interval = def?.attackInterval ?? ATTACK_INTERVAL;
     const windup = e.attacking && (def?.dps ?? 0) > 0 ? Phaser.Math.Clamp(1 - e.cooldown / interval, 0, 1) : 0;
-    const pull = windup * windup * (boss ? 14 : 7);
+    const pull = windup * windup * (boss ? (style?.profile === 'tanky' ? 4 : 14) : 7);
+    // tanky bosses rise on the wind-up and slam down on the hit
+    const hop = style?.profile === 'tanky' ? windup * windup * 26 : 0;
     const jitter = (e.id % 3) * 4;
-    s.img.setPosition(this.fxX(e.x) + dir * (s.lunge - pull - s.knock) - dir * jitter, this.groundY - bob);
+    s.img.setPosition(this.fxX(e.x) + dir * (s.lunge - pull - s.knock) - dir * jitter, this.groundY - bob - hop);
     // bosses sit behind the small cats so a victim stays visible under the big body
     s.img.setDepth(10 + (e.side === 'left' ? e.x : FIELD_LENGTH - e.x) / 100 - (boss ? 6 : 0));
     const strike = Math.max(0, s.lunge) / this.strikeLen(boss);
@@ -312,10 +430,20 @@ export class BattleScene extends Phaser.Scene {
       s.img.setAlpha(p);
     }
     s.img.setScale(s.base * sx, s.base * sy);
+    const enraged = style?.kind === 'enrage' && e.hp / e.maxHp < (style.ability as { below: number }).below;
     if (time < s.hurtUntil) s.img.setTint(0xff4040);
     else if (e.special) s.img.setTint(0xffe066);
+    else if (enraged) s.img.setTint(0xff9a9a);
     else if (e.side === 'right' && !boss) s.img.setTint(0xffc9c9);
     else s.img.clearTint();
+    if (s.aura && style) {
+      this.bossFx.drawAura(s.aura, e, style, this.centerX(s), s.img.displayHeight, time, dir);
+      // ambient: regenerating bosses sparkle while below full hp
+      if ((style.kind === 'regen' || style.kind === 'healAllies') && e.hp < e.maxHp && time > s.nextFx) {
+        s.nextFx = time + 550;
+        this.bossFx.healSparkle(this.centerX(s), this.groundY - s.img.displayHeight * 0.6);
+      }
+    }
 
     const w = boss ? 44 : 28;
     const h = s.img.displayHeight;
