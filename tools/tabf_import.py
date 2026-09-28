@@ -14,6 +14,12 @@ usage:
 
 --count is the number of questions per session (60 for most TABF exams, 80 for 永續發展基礎能力).
 
+Layout "sfi" (證基會 examweb.sfi.org.tw): one portrait single-column file <id>.pdf with (A)-(D) options,
+<id>a.pdf is an answer grid "1 C 17 B 33 C ..." (five number/letter pairs per line). --ids takes the
+file stem, e.g. 01_81 for data/pdf/sfi/01_81.pdf + 01_81a.pdf.
+  python tools/tabf_import.py --dir data/pdf/sfi --ids 01_81,02_81,01_82 --layout sfi --count 80 \
+      --category esg --name 永續發展基礎能力 --sort 3 --out data/questions/esg_sfi.json
+
 Multiple-answer items (e.g. "2、3、4") and items whose text could not be parsed into exactly
 four options are skipped and reported, so nothing malformed reaches the game.
 """
@@ -31,7 +37,7 @@ sys.stdout.reconfigure(encoding="utf-8")
 Q_RE = re.compile(r"^(\d{1,2})(「?)\.\s*(.*)$")
 OPT_RE = re.compile(r"^\((\d)\)\s*(.*)$")
 NOISE_RE = re.compile(
-    r"^(第\s*[\d一二三四]+\s*部分|注意：|本試卷|鉛筆在|答案卡|選作答|\d+\s*$|台灣金融研訓院|節次：|第\s*\d+\s*期.*測驗試題$)"
+    r"^(第\s*[\d一二三四]+\s*部分|注意：|※\s*注意|本試卷|鉛筆在|答案卡|選作答|測驗為單一選擇題|為單一選擇題|\d+\s*$|台灣金融研訓院|節次：|科目：|第\s*\d+\s*期.*測驗試題$|\d+\s*年\s*第\s*\d+\s*次.*測驗試題)"
 )
 
 
@@ -90,6 +96,61 @@ def parse_questions(pdf_path, columns=1):
     return qs
 
 
+ALPHA = "ABCD"
+
+
+def parse_questions_alpha(pdf_path, count=80):
+    """SFI layout: "N. 題目" then options labelled (A)-(D), possibly several per line.
+    Option labels are consumed strictly in order (A, then B, ...), so text like "選項(A)(B)(C)皆非"
+    inside option D is not mistaken for new options."""
+    qs = {}
+    cur = None
+    cur_opt = 0  # 0 = still in the stem, 1..4 = last option seen
+    q_re = re.compile(r"^(\d{1,2})\.\s+(.*)$")
+    for ln in page_lines(pdf_path):
+        m = q_re.match(ln)
+        nxt = 1 if cur is None else cur + 1
+        if m and int(m.group(1)) == nxt and nxt <= count:
+            cur = nxt
+            cur_opt = 0
+            qs[cur] = {"text": m.group(2).strip(), "options": {}}
+            continue
+        if cur is None:
+            continue
+        rest = ln
+        while cur_opt < 4:
+            label = f"({ALPHA[cur_opt]})"
+            i = rest.find(label)
+            if i < 0:
+                break
+            before = rest[:i]
+            if cur_opt == 0:
+                qs[cur]["text"] += before
+            else:
+                qs[cur]["options"][cur_opt] += before
+            cur_opt += 1
+            qs[cur]["options"][cur_opt] = ""
+            rest = rest[i + len(label):]
+        if cur_opt == 0:
+            qs[cur]["text"] += rest
+        else:
+            qs[cur]["options"][cur_opt] += rest
+    return qs
+
+
+def parse_answers_grid(pdf_path, count=80):
+    """Answer grid "1 C 17 B 33 C 49 D 65 B" -> {num: 1..4 or None}."""
+    out = {}
+    with pdfplumber.open(pdf_path) as pdf:
+        text = "\n".join((p.extract_text() or "") for p in pdf.pages)
+    for ln in text.splitlines():
+        for n, tok in re.findall(r"(?<![\d.])(\d{1,3})\s+([A-D]|\S+)(?=\s|$)", ln):
+            n = int(n)
+            if 1 <= n <= count and n not in out:
+                out[n] = ALPHA.index(tok) + 1 if tok in ALPHA else None
+    return out
+
+
 def parse_answers(pdf_path, count=60):
     """Return {session(1|2): {num: answer_or_None}}; None for multi-answer / 送分 items."""
     out = {1: {}, 2: {}}
@@ -129,6 +190,8 @@ def clean(s):
     # a closing quote with no opening one is a layout artifact (e.g. a stray 」 on its own line)
     if "」" in s and "「" not in s:
         s = s.replace("」", "").strip()
+    # options are shuffled in the game, so "選項(A)(B)(C)皆非" cannot refer to labels; use the plain wording
+    s = re.sub(r"選項\s*\(A\)\s*\(B\)\s*\(C\)\s*皆(非|是)", r"以上皆\1", s)
     return s
 
 
@@ -140,14 +203,17 @@ def main():
     ap.add_argument("--name", required=True)
     ap.add_argument("--sort", type=int, default=0)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--layout", choices=["two-session", "single2col"], default="two-session")
+    ap.add_argument("--layout", choices=["two-session", "single2col", "sfi"], default="two-session")
     ap.add_argument("--count", type=int, default=60, help="questions per session (60, or 80 for 永續發展基礎能力)")
     a = ap.parse_args()
 
     questions = []
     skipped = []
     for exam in a.ids.split(","):
-        if a.layout == "single2col":
+        if a.layout == "sfi":
+            answers = {1: parse_answers_grid(os.path.join(a.dir, f"{exam}a.pdf"), a.count)}
+            sessions = [(1, parse_questions_alpha(os.path.join(a.dir, f"{exam}.pdf"), a.count))]
+        elif a.layout == "single2col":
             answers = {1: parse_answers_single(os.path.join(a.dir, f"{exam}-2.pdf"), a.count)}
             sessions = [(1, parse_questions(os.path.join(a.dir, f"{exam}-1.pdf"), columns=2))]
         else:
@@ -176,7 +242,11 @@ def main():
                         "text": text,
                         "options": [clean(q["options"][i]) for i in range(1, 5)],
                         "answerIndex": ans - 1,
-                        "source": f"金研院 {exam} 第{session}節 第{n}題" if a.layout != "single2col" else f"金研院 {exam} 第{n}題",
+                        "source": (
+                            f"證基會 {exam} 第{n}題" if a.layout == "sfi"
+                            else f"金研院 {exam} 第{n}題" if a.layout == "single2col"
+                            else f"金研院 {exam} 第{session}節 第{n}題"
+                        ),
                     }
                 )
     bank = {"category": {"id": a.category, "name": a.name, "sortOrder": a.sort}, "questions": questions}
