@@ -14,7 +14,7 @@ export interface StageDef {
 /** Total number of stages. */
 export const STAGE_COUNT = BOSS_COUNT;
 /** AI income curve knobs: scorePerSec = base + gain * t^pow */
-export const STAGE_TUNE = { base: 0.5, gain: 2.5, pow: 1.8, respawnFrom: 80, respawnMs: 75_000 };
+export const STAGE_TUNE = { base: 0.9, gain: 3.5, pow: 1.6, respawnFrom: 60, respawnMs: 60_000 };
 
 const STRATEGIES: string[][] = [
   ['tank', 'tank', 'archer'],
@@ -35,13 +35,13 @@ const STRATEGIES: string[][] = [
 export function stageAi(n: number): AiConfig {
   const t = Math.min(1, Math.max(0, (n - 1) / (STAGE_COUNT - 1)));
   const scorePerSec = +(STAGE_TUNE.base + STAGE_TUNE.gain * Math.pow(t, STAGE_TUNE.pow)).toFixed(2);
-  const warmupMs = Math.round(Math.max(0, 8000 - 8000 * t));
+  const warmupMs = Math.round(Math.max(0, 3000 - 3000 * t));
   const strategy = STRATEGIES[Math.min(STRATEGIES.length - 1, Math.floor(t * STRATEGIES.length))];
   return {
     scorePerSec,
     strategy,
     warmupMs,
-    boss: { unitId: bossId(n), atMs: Math.round(60_000 - 35_000 * t), respawnMs: n >= STAGE_TUNE.respawnFrom ? STAGE_TUNE.respawnMs : 0 },
+    boss: { unitId: bossId(n), atMs: Math.round(20_000 - 8_000 * t), respawnMs: n >= STAGE_TUNE.respawnFrom ? STAGE_TUNE.respawnMs : 0 },
   };
 }
 

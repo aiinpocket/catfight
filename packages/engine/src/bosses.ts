@@ -162,7 +162,7 @@ export function bossAbility(kind: BossAbility['kind'], n: number): BossAbility {
     case 'regen':
       return { kind, perSec: Math.round(lerp(5, 40)) };
     case 'summon':
-      return { kind, everySec: Math.round(lerp(12, 7)), unitId: n < 40 ? 'tank' : n < 75 ? 'archer' : 'mage' };
+      return { kind, everySec: Math.round(lerp(18, 7)), unitId: n < 40 ? 'tank' : n < 75 ? 'archer' : 'mage' };
     case 'slowAura':
       return { kind, frac: lerp(0.2, 0.4) };
     case 'knockback':
@@ -236,7 +236,7 @@ export function abilityText(a: BossAbility): string {
 }
 
 /** global boss stat multipliers (balance knobs) */
-export const BOSS_TUNE = { hpMul: 0.6, dpsMul: 0.7 };
+export const BOSS_TUNE = { hpMul: 0.8, dpsMul: 0.9 };
 const bossCache = new Map<number, UnitDef>();
 let cacheKey = '';
 
