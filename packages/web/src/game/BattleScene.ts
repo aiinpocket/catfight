@@ -25,6 +25,10 @@ interface SpriteRec {
   /** melee lunge offset, decays each frame */
   lunge: number;
   knock: number;
+  /** resting scale; per-frame squash/stretch is applied on top */
+  base: number;
+  /** ms timestamp of the spawn pop-in */
+  spawnAt: number;
 }
 
 /** Renders the engine state with hit feedback: projectiles, lunges, damage numbers, beams, tower shake. */
@@ -125,13 +129,14 @@ export class BattleScene extends Phaser.Scene {
           this.shootProjectile(this.centerX(a), this.groundY - a.img.displayHeight * 0.6, tx, ty, aside, () => this.impact(tx, ty, aside === 'left' ? 0x9fd3ff : 0xffb3b3, big));
           a.lunge = -8; // recoil
         } else if (a) {
-          a.lunge = 30; // strike: the whole body snaps into the target
+          const abig = !!byId.get(ev.attackerId)?.unitId.startsWith('boss_');
+          a.lunge = this.strikeLen(abig); // strike: the whole body snaps into the target
+          this.slash(tx, ty, aside, abig);
           this.impact(tx, ty, 0xffffff, big);
         }
         if (t) {
           t.hurtUntil = time + 140;
-          t.knock = 7;
-          this.tweens.add({ targets: t.img, scaleX: t.img.scaleX * 0.9, scaleY: t.img.scaleY * 1.08, duration: 70, yoyo: true });
+          t.knock = byId.get(ev.attackerId)?.unitId.startsWith('boss_') ? 14 : 7;
         }
         this.damageText(tx, ty - 14, Math.round(ev.amount), target?.side === 'left' ? '#ff6b6b' : '#ffe066');
       } else if (ev.type === 'evade') {
@@ -146,11 +151,13 @@ export class BattleScene extends Phaser.Scene {
         if (a && attacker) {
           const tx = tower.x + (ev.side === 'left' ? tower.displayWidth * 0.3 : -tower.displayWidth * 0.3);
           const ty = this.groundY - tower.displayHeight * 0.45;
+          const abig = attacker.unitId.startsWith('boss_');
           if (attacker.range > 60) {
             this.shootProjectile(this.centerX(a), this.groundY - a.img.displayHeight * 0.6, tx, ty, attacker.side, () => this.impact(tx, ty, 0xffffff, false));
             a.lunge = -8;
           } else {
-            a.lunge = 30;
+            a.lunge = this.strikeLen(abig);
+            this.slash(tx, ty, attacker.side, abig);
             this.impact(tx, ty, 0xffffff, false);
           }
         }
@@ -195,6 +202,24 @@ export class BattleScene extends Phaser.Scene {
     this.tweens.add({ targets: spark, scale: big ? 1.8 : 1.4, angle: spark.angle + 45, alpha: 0, duration: 180, onComplete: () => spark.destroy() });
   }
 
+  /** how far a melee strike carries the body; bosses are ~2.3x larger so their lunge scales with them */
+  private strikeLen(boss: boolean) {
+    return boss ? 70 : 30;
+  }
+
+  /** a weapon-swing arc in front of the target, drawn in the attacker's direction */
+  private slash(x: number, y: number, side: Side, boss: boolean) {
+    const r = boss ? 46 : 22;
+    const g = this.add.graphics().setDepth(72);
+    const dir = side === 'left' ? 1 : -1;
+    // arc sweeping from above to below the impact point, bulging toward the target
+    const start = dir === 1 ? -Math.PI * 0.45 : Math.PI * 0.55;
+    const end = dir === 1 ? Math.PI * 0.45 : Math.PI * 1.45;
+    g.lineStyle(boss ? 9 : 5, 0xffffff, 0.95).beginPath().arc(x - dir * r * 0.4, y, r, start, end, false).strokePath();
+    g.lineStyle(boss ? 4 : 2, 0xffe066, 0.9).beginPath().arc(x - dir * r * 0.4, y, r * 0.8, start, end, false).strokePath();
+    this.tweens.add({ targets: g, alpha: 0, scaleX: 1.25, scaleY: 1.25, duration: boss ? 240 : 170, ease: 'Cubic.Out', onComplete: () => g.destroy() });
+  }
+
   /** screen x of a sprite's body centre (sprites are anchored at their front edge) */
   private centerX(s: SpriteRec) {
     return s.img.getCenter().x ?? s.img.x;
@@ -225,14 +250,13 @@ export class BattleScene extends Phaser.Scene {
         // boss art already faces left; regular sprites face right
         if (e.side === 'right' && !boss) img.setFlipX(true).setTint(0xffc9c9);
         if (e.side === 'left' && boss) img.setFlipX(true);
-        s = { img, hp: this.add.graphics(), hurtUntil: 0, lunge: 0, knock: 0 };
+        s = { img, hp: this.add.graphics(), hurtUntil: 0, lunge: 0, knock: 0, base: scale, spawnAt: boss ? this.time.now : 0 };
         if (boss) {
           s.label = this.add
             .text(img.x, 0, this.driver.bossName ?? 'BOSS', { fontSize: '11px', fontStyle: 'bold', color: '#ffe066', fontFamily: 'sans-serif', stroke: '#000000', strokeThickness: 3 })
             .setOrigin(0.5, 1)
             .setDepth(51);
-          img.setAlpha(0).setScale(scale * 1.4);
-          this.tweens.add({ targets: img, alpha: 1, scaleX: scale, scaleY: scale, duration: 400, ease: 'Back.Out' });
+          img.setAlpha(0);
         }
         this.sprites.set(e.id, s);
       }
@@ -263,12 +287,27 @@ export class BattleScene extends Phaser.Scene {
     // wind-up: while a hit is charging, the cat pulls back and leans, then snaps forward on the hit event
     const interval = def?.attackInterval ?? ATTACK_INTERVAL;
     const windup = e.attacking && (def?.dps ?? 0) > 0 ? Phaser.Math.Clamp(1 - e.cooldown / interval, 0, 1) : 0;
-    const pull = windup * windup * (boss ? 10 : 7);
+    const pull = windup * windup * (boss ? 26 : 7);
     const jitter = (e.id % 3) * 4;
     s.img.setPosition(this.fxX(e.x) + dir * (s.lunge - pull - s.knock) - dir * jitter, this.groundY - bob);
     s.img.setDepth(10 + (e.side === 'left' ? e.x : FIELD_LENGTH - e.x) / 100 + (boss ? 5 : 0));
-    const strike = Math.max(0, s.lunge) / 30;
-    s.img.setAngle(dir * (strike * 22 - windup * 12));
+    const strike = Math.max(0, s.lunge) / this.strikeLen(boss);
+    s.img.setAngle(dir * (strike * (boss ? 16 : 22) - windup * (boss ? 8 : 12)));
+    // squash while charging, stretch forward on the strike, flinch when hurt, pop in on spawn
+    let sx = 1 + strike * 0.16 - windup * 0.06;
+    let sy = 1 - windup * 0.12 + strike * 0.04;
+    if (time < s.hurtUntil) {
+      sx *= 1.06;
+      sy *= 0.9;
+    }
+    if (s.spawnAt) {
+      const p = Phaser.Math.Clamp((time - s.spawnAt) / 400, 0, 1);
+      const pop = 1 + 0.4 * (1 - p) * (1 - p);
+      sx *= pop;
+      sy *= pop;
+      s.img.setAlpha(p);
+    }
+    s.img.setScale(s.base * sx, s.base * sy);
     if (time < s.hurtUntil) s.img.setTint(0xff4040);
     else if (e.special) s.img.setTint(0xffe066);
     else if (e.side === 'right' && !boss) s.img.setTint(0xffc9c9);
