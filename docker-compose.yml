@@ -39,8 +39,11 @@ services:
     image: caddy:2-alpine
     restart: unless-stopped
     ports:
-      # only reachable from the VM itself; public traffic comes in through the Cloudflare Tunnel (cloudflared -> localhost:80)
-      - "127.0.0.1:80:80"
+      # default binds to localhost only (put a tunnel or reverse proxy in front); to expose Caddy directly
+      # set CADDY_HTTP_BIND=80 and CADDY_HTTPS_BIND=443 in .env and give SITE_ADDRESS a domain for automatic HTTPS
+      - "${CADDY_HTTP_BIND:-127.0.0.1:80}:80"
+      - "${CADDY_HTTPS_BIND:-127.0.0.1:443}:443"
+      - "${CADDY_HTTPS_BIND:-127.0.0.1:443}:443/udp"
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
     volumes:
