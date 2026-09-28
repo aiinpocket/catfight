@@ -12,6 +12,7 @@ import {
   UNITS,
   type AiConfig,
   type BattleState,
+  spawnFree,
 } from '@catfight/engine';
 import { api, type Me, type MatchResultInput, ApiError } from '../api';
 import { BattleScene } from './BattleScene';
@@ -60,7 +61,12 @@ export function runBattle(root: HTMLElement, setup: BattleSetup): Promise<{ outc
 
     const state: BattleState = createBattle({ left: setup.me.upgrades ?? {} });
     // debug/e2e hook
-    (window as unknown as { __cf?: unknown }).__cf = { get entities() { return state.entities.length; }, get state() { return state; } };
+    (window as unknown as { __cf?: unknown }).__cf = {
+      get entities() { return state.entities.length; },
+      get state() { return state; },
+      // visual checks: drop any unit onto the field without spending score (client-side only; the server never sees it)
+      spawnFree: (side: 'left' | 'right', unitId: string, x?: number) => spawnFree(state, side, unitId, x),
+    };
     const ai = createAi('right', { ...setup.ai, strategy: setup.ai.strategy.length ? setup.ai.strategy : DEFAULT_STRATEGY });
     let totalScore = 0;
     let finished = false;
