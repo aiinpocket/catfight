@@ -1,6 +1,9 @@
 import Phaser from 'phaser';
 import { ATTACK_INTERVAL, BALANCE, FIELD_LENGTH, TICK_MS, UNITS, unitDef, type BattleEvent, type BattleState, type Entity, type Side, SMALL_UNIT_SCALE } from '@catfight/engine';
 
+/** boss sprite size relative to a regular cat */
+const BOSS_SIZE_MUL = 1.5;
+
 export interface BattleDriver {
   /** advance the game by one fixed tick */
   tick(): void;
@@ -204,12 +207,12 @@ export class BattleScene extends Phaser.Scene {
 
   /** how far a melee strike carries the body; bosses are ~2.3x larger so their lunge scales with them */
   private strikeLen(boss: boolean) {
-    return boss ? 52 : 30;
+    return boss ? 42 : 30;
   }
 
   /** a weapon-swing arc in front of the target, drawn in the attacker's direction */
   private slash(x: number, y: number, side: Side, boss: boolean) {
-    const r = boss ? 46 : 22;
+    const r = boss ? 32 : 22;
     const g = this.add.graphics().setDepth(72);
     const dir = side === 'left' ? 1 : -1;
     // arc sweeping from above to below the impact point, bulging toward the target
@@ -243,8 +246,8 @@ export class BattleScene extends Phaser.Scene {
       if (!s) {
         const boss = isBoss(e.unitId);
         const key = this.textures.exists(e.unitId) ? e.unitId : 'tank';
-        // bosses keep the full sprite size; regular cats are smaller so future units have room to vary
-        const scale = this.unitScale * (boss ? 1.6 : SMALL_UNIT_SCALE);
+        // bosses are drawn at BOSS_SIZE_MUL x a regular cat
+        const scale = this.unitScale * SMALL_UNIT_SCALE * (boss ? BOSS_SIZE_MUL : 1);
         // anchor at the front edge (art has ~15% transparent padding): a melee pair stands nose to nose instead of overlapping
         const img = this.add.image(this.fxX(e.x), this.groundY, key).setOrigin(e.side === 'left' ? 0.82 : 0.18, 1).setScale(scale);
         // boss art already faces left; regular sprites face right
@@ -287,7 +290,7 @@ export class BattleScene extends Phaser.Scene {
     // wind-up: while a hit is charging, the cat pulls back and leans, then snaps forward on the hit event
     const interval = def?.attackInterval ?? ATTACK_INTERVAL;
     const windup = e.attacking && (def?.dps ?? 0) > 0 ? Phaser.Math.Clamp(1 - e.cooldown / interval, 0, 1) : 0;
-    const pull = windup * windup * (boss ? 26 : 7);
+    const pull = windup * windup * (boss ? 14 : 7);
     const jitter = (e.id % 3) * 4;
     s.img.setPosition(this.fxX(e.x) + dir * (s.lunge - pull - s.knock) - dir * jitter, this.groundY - bob);
     // bosses sit behind the small cats so a victim stays visible under the big body
@@ -314,7 +317,7 @@ export class BattleScene extends Phaser.Scene {
     else if (e.side === 'right' && !boss) s.img.setTint(0xffc9c9);
     else s.img.clearTint();
 
-    const w = boss ? 64 : 28;
+    const w = boss ? 44 : 28;
     const h = s.img.displayHeight;
     const y = this.groundY - h - 10;
     const cx = this.centerX(s);
