@@ -108,6 +108,7 @@ export function runBattle(root: HTMLElement, setup: BattleSetup): Promise<{ outc
     const driver = {
       state,
       bossId: setup.boss?.unitId,
+      bossName: setup.boss?.name,
       onEvents(events: BattleState['events']) {
         for (const ev of events) {
           if (ev.type === 'spawn' && ev.unitId.startsWith('boss_')) toast(wrap, `BOSS 登場：${bossNames.get(ev.unitId) ?? ev.unitId}`);
@@ -137,6 +138,7 @@ export function runBattle(root: HTMLElement, setup: BattleSetup): Promise<{ outc
       render: { pixelArt: false, antialias: true },
     });
     game.scene.start('battle', { driver });
+    (window as unknown as { __cf: { game?: Phaser.Game } }).__cf.game = game;
 
     feed
       .init()

@@ -33,12 +33,17 @@ test('register, play a stage, answer, summon', async ({ page }) => {
 
   // answer correctly using the API as the oracle (the UI never reveals the answer before choosing)
   const token = await page.evaluate(() => localStorage.getItem('catfight.token'));
-  const qs = (await (await page.request.get(`/api/questions?category=${category}&limit=100`, { headers: { authorization: `Bearer ${token}` } })).json()) as {
-    text: string;
-    options: string[];
-    answerIndex: number;
-  }[];
-  // options are shuffled on every delivery, so key the oracle by the correct option's text
+  // page through the bank (max 100 per call) so the oracle covers every question that can appear
+  const qs: { id: number; text: string; options: string[]; answerIndex: number }[] = [];
+  for (let i = 0; i < 6; i++) {
+    const ex = qs.map((q) => q.id).join(',');
+    const page_ = (await (
+      await page.request.get(`/api/questions?category=${category}&limit=100${ex ? `&exclude=${ex}` : ''}`, { headers: { authorization: `Bearer ${token}` } })
+    ).json()) as typeof qs;
+    const fresh = page_.filter((q) => !qs.some((k) => k.id === q.id));
+    qs.push(...fresh);
+    if (fresh.length < 100) break;
+  }
   const answers = new Map(qs.map((q) => [q.text, q.options[q.answerIndex]]));
 
   let score = 0;

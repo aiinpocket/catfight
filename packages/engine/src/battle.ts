@@ -44,7 +44,9 @@ export interface Entity {
 export type BattleEvent =
   | { type: 'spawn'; entityId: number; side: Side; unitId: string }
   | { type: 'death'; entityId: number; side: Side; unitId: string }
-  | { type: 'towerHit'; side: Side; amount: number }
+  | { type: 'towerHit'; side: Side; amount: number; attackerId?: number }
+  | { type: 'hit'; attackerId: number; targetId: number; amount: number; ranged: boolean; snipe: boolean }
+  | { type: 'evade'; targetId: number }
   | { type: 'special'; entityId: number; unitId: string; kind: string }
   | { type: 'win'; side: Side };
 
@@ -174,6 +176,7 @@ interface Hit {
   attacker: Entity;
   target: Entity;
   dmg: number;
+  snipe?: boolean;
 }
 
 /** Advance the simulation by one tick. Deterministic. */
@@ -228,7 +231,7 @@ export function step(state: BattleState, dtMs = TICK_MS): void {
         e.abilityAt = state.timeMs;
         e.special = true;
         e.attacking = true;
-        for (const t of snapshot) if (t.side === enemy && t.hp > 0 && (px(t) - ex) * d >= -5) hits.push({ attacker: e, target: t, dmg: boss.dmg });
+        for (const t of snapshot) if (t.side === enemy && t.hp > 0 && (px(t) - ex) * d >= -5) hits.push({ attacker: e, target: t, dmg: boss.dmg, snipe: true });
         state.events.push({ type: 'special', entityId: e.id, unitId: e.unitId, kind: boss.kind });
       }
     }
@@ -274,7 +277,9 @@ export function step(state: BattleState, dtMs = TICK_MS): void {
         if (e.cooldown <= 0) {
           e.hit = true;
           e.cooldown = interval;
-          towerDamage[enemy] += boss?.kind === 'towerBuster' ? hitDmg * boss.mult : hitDmg;
+          const td = boss?.kind === 'towerBuster' ? hitDmg * boss.mult : hitDmg;
+          towerDamage[enemy] += td;
+          state.events.push({ type: 'towerHit', side: enemy, amount: td, attackerId: e.id });
         }
         continue;
       }
@@ -297,13 +302,17 @@ export function step(state: BattleState, dtMs = TICK_MS): void {
     let dmg = h.dmg;
     if (tb?.kind === 'evade') {
       h.target.hitsTaken++;
-      if (h.target.hitsTaken % tb.every === 0) continue;
+      if (h.target.hitsTaken % tb.every === 0) {
+        state.events.push({ type: 'evade', targetId: h.target.id });
+        continue;
+      }
     }
     if (tb?.kind === 'armor') dmg *= 1 - tb.frac;
     const ab = unitDef(h.attacker.unitId).boss;
     if (ab?.kind === 'lifesteal') h.attacker.hp = Math.min(h.attacker.maxHp, h.attacker.hp + dmg * ab.frac);
     if (ab?.kind === 'execute' && h.target.hp - dmg > 0 && (h.target.hp - dmg) / h.target.maxHp < ab.below && !isBoss(h.target)) dmg = h.target.hp;
     damage.set(h.target.id, (damage.get(h.target.id) ?? 0) + dmg);
+    state.events.push({ type: 'hit', attackerId: h.attacker.id, targetId: h.target.id, amount: dmg, ranged: h.attacker.range > 60 || !!h.snipe, snipe: !!h.snipe });
   }
   // knockback: dx already points toward the target's own tower
   for (const p of pushes) p.e.x = Math.max(0, Math.min(FIELD_LENGTH, p.e.x + p.dx));
@@ -338,10 +347,7 @@ export function step(state: BattleState, dtMs = TICK_MS): void {
     towerDamage.right += BALANCE.overtimeBleed * dt;
   }
   for (const side of ['left', 'right'] as Side[]) {
-    if (towerDamage[side] > 0) {
-      state.towerHp[side] = Math.max(0, state.towerHp[side] - towerDamage[side]);
-      state.events.push({ type: 'towerHit', side, amount: towerDamage[side] });
-    }
+    if (towerDamage[side] > 0) state.towerHp[side] = Math.max(0, state.towerHp[side] - towerDamage[side]);
   }
   if (state.towerHp.right <= 0 && state.towerHp.left <= 0) {
     // simultaneous (overtime): more army hp wins, then more unspent score, then tick parity
