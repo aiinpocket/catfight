@@ -67,12 +67,17 @@ describe('categories, questions and stages', () => {
     expect(n).toBe(0);
   });
 
-  it('re-importing a corrected question updates its options and answer', async () => {
-    const n = await importBank(db, { category: { id: 'security', name: '安控', sortOrder: 2 }, questions: [{ text: '安控題', options: ['A', 'B', 'C', 'D2'], answerIndex: 3 }] });
+  it('re-importing a corrected answer updates the row; a different option set is a new question', async () => {
+    const n = await importBank(db, { category: { id: 'security', name: '安控', sortOrder: 2 }, questions: [{ text: '安控題', options: ['A', 'B', 'C', 'D'], answerIndex: 3 }] });
     expect(n).toBe(1);
-    const r = await db.query<{ options: string[]; answer_index: number }>("SELECT options, answer_index FROM questions WHERE category = 'security' AND text = '安控題'");
-    expect(r.rows[0].options).toEqual(['A', 'B', 'C', 'D2']);
+    const r = await db.query<{ answer_index: number }>("SELECT answer_index FROM questions WHERE category = 'security' AND text = '安控題'");
+    expect(r.rows).toHaveLength(1);
     expect(r.rows[0].answer_index).toBe(3);
+    const m = await importBank(db, { category: { id: 'security', name: '安控', sortOrder: 2 }, questions: [{ text: '安控題', options: ['E', 'F', 'G', 'H'], answerIndex: 0 }] });
+    expect(m).toBe(1);
+    const r2 = await db.query("SELECT id FROM questions WHERE category = 'security' AND text = '安控題'");
+    expect(r2.rows).toHaveLength(2);
+    await db.query("DELETE FROM questions WHERE category = 'security' AND options::text LIKE '%\"E\"%'");
     await importBank(db, { category: { id: 'security', name: '安控', sortOrder: 2 }, questions: [{ text: '安控題', options: ['A', 'B', 'C', 'D'], answerIndex: 1 }] });
   });
 
