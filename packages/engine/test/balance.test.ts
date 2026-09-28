@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildStages, simulateMatch, stageAi, type SimPlayer } from '../src/index.js';
+import { buildStages, simulateMatch, stageAi, uniformUpgrades, type SimPlayer } from '../src/index.js';
 
 const avg: SimPlayer = { secPerQuestion: 4, accuracy: 0.7 };
 
@@ -33,20 +33,23 @@ describe('balance: two average players', () => {
 });
 
 describe('balance: stage curve', () => {
-  it('stage 1 is beatable by a weak player, stage 15 is hard for an average one', () => {
+  it('stage 1 is beatable by a weak player, stage 55 is a coin flip for an upgraded average one', () => {
     const weak: SimPlayer = { secPerQuestion: 6, accuracy: 0.55, strategy: ['tank', 'archer'] };
     const w1 = Array.from({ length: 100 }, (_, i) => simulateMatch(weak, stageAi(1), i + 1)).filter((r) => r.winner === 'left').length;
     expect(w1).toBeGreaterThan(60);
-    const w8 = Array.from({ length: 100 }, (_, i) => simulateMatch(avg, stageAi(15), i + 1)).filter((r) => r.winner === 'left').length;
-    expect(w8).toBeLessThan(50);
-    expect(w8).toBeGreaterThan(5);
+    const mid = { ...avg, upgrades: uniformUpgrades(5) };
+    const w55 = Array.from({ length: 60 }, (_, i) => simulateMatch(mid, stageAi(55), i + 1)).filter((r) => r.winner === 'left').length / 60;
+    expect(w55).toBeLessThan(0.9);
+    expect(w55).toBeGreaterThan(0.2);
   });
 
   it('difficulty is monotonic and cycles categories', () => {
-    for (let n = 1; n < 20; n++) expect(stageAi(n + 1).scorePerSec).toBeGreaterThanOrEqual(stageAi(n).scorePerSec);
-    const st = buildStages([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }, { id: 'c', name: 'C' }], 2);
+    for (let n = 1; n < 100; n++) expect(stageAi(n + 1).scorePerSec).toBeGreaterThanOrEqual(stageAi(n).scorePerSec);
+    expect(stageAi(100).scorePerSec).toBeGreaterThan(stageAi(1).scorePerSec * 4);
+    const st = buildStages([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }, { id: 'c', name: 'C' }], 6);
     expect(st.map((s) => s.category)).toEqual(['a', 'b', 'c', 'a', 'b', 'c']);
-    expect(st[3].ai.scorePerSec).toBeGreaterThan(st[0].ai.scorePerSec);
+    expect(st[3].boss.hp).toBeGreaterThanOrEqual(st[0].boss.hp * 0.5);
+    expect(st[3].boss.name).not.toBe(st[0].boss.name);
     expect(buildStages([])).toEqual([]);
   });
 });

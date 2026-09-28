@@ -25,6 +25,11 @@ gcloud compute instances add-tags "$VM" --project="$PROJECT" --zone="$ZONE" --ta
 
 ssh_vm "sudo mkdir -p $REMOTE_DIR && sudo chown \$USER $REMOTE_DIR"
 gcloud compute scp "$ARCHIVE" "$VM:/tmp/catfight.tgz" --project="$PROJECT" --zone="$ZONE" --quiet
+# question banks are not in git: ship whatever *.json is in data/questions (existing files on the VM are kept)
+if ls data/questions/*.json >/dev/null 2>&1; then
+  ssh_vm "mkdir -p $REMOTE_DIR/data/questions"
+  gcloud compute scp data/questions/*.json "$VM:$REMOTE_DIR/data/questions/" --project="$PROJECT" --zone="$ZONE" --quiet
+fi
 ssh_vm "set -e
   if ! command -v docker >/dev/null; then
     curl -fsSL https://get.docker.com | sudo sh

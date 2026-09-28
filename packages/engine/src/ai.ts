@@ -1,5 +1,13 @@
-import { spawn, type BattleState } from './battle.js';
+import { spawn, spawnFree, towerX, type BattleState } from './battle.js';
 import type { Side } from './units.js';
+
+export interface BossSpawn {
+  unitId: string;
+  /** when the boss first appears */
+  atMs: number;
+  /** re-appears this long after it dies (0 = never) */
+  respawnMs?: number;
+}
 
 export interface AiConfig {
   /** score gained per second (simulates answering) */
@@ -8,6 +16,8 @@ export interface AiConfig {
   strategy: string[];
   /** delay before AI starts earning, ms */
   warmupMs?: number;
+  /** stage boss */
+  boss?: BossSpawn;
 }
 
 export interface AiState {
@@ -15,6 +25,9 @@ export interface AiState {
   side: Side;
   idx: number;
   accum: number;
+  bossEntityId: number | null;
+  bossDiedAt: number | null;
+  bossSpawns: number;
 }
 
 export const DEFAULT_STRATEGY = ['tank', 'archer', 'tank', 'archer', 'mage', 'tank', 'runner', 'archer', 'medic', 'scholar'];
@@ -22,12 +35,30 @@ export const DEFAULT_STRATEGY = ['tank', 'archer', 'tank', 'archer', 'mage', 'ta
 export const DEFAULT_SCORE_PER_SEC = 1.75;
 
 export function createAi(side: Side, cfg: AiConfig): AiState {
-  return { cfg, side, idx: 0, accum: 0 };
+  return { cfg, side, idx: 0, accum: 0, bossEntityId: null, bossDiedAt: null, bossSpawns: 0 };
 }
 
-/** Accrue score continuously and spawn according to strategy. Call once per tick before step(). */
+/** Accrue score continuously and spawn according to strategy; handles boss (re)spawns. Call once per tick before step(). */
 export function aiStep(state: BattleState, ai: AiState, dtMs: number): void {
   if (state.winner) return;
+  const boss = ai.cfg.boss;
+  if (boss) {
+    if (ai.bossEntityId !== null && !state.entities.some((e) => e.id === ai.bossEntityId)) {
+      ai.bossEntityId = null;
+      ai.bossDiedAt = state.timeMs;
+    }
+    const due =
+      ai.bossEntityId === null &&
+      (ai.bossSpawns === 0 ? state.timeMs >= boss.atMs : !!boss.respawnMs && ai.bossDiedAt !== null && state.timeMs - ai.bossDiedAt >= boss.respawnMs);
+    if (due) {
+      // bosses step out in front of their tower so stationary ones do not sit on it
+      const e = spawnFree(state, ai.side, boss.unitId, towerX(ai.side) + (ai.side === 'left' ? 80 : -80));
+      if (e) {
+        ai.bossEntityId = e.id;
+        ai.bossSpawns++;
+      }
+    }
+  }
   if ((ai.cfg.warmupMs ?? 0) > state.timeMs) return;
   ai.accum += ai.cfg.scorePerSec * (dtMs / 1000);
   const whole = Math.floor(ai.accum);

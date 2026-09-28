@@ -1,6 +1,8 @@
 import { addScore, createBattle, spawn, step, TICK_MS, type BattleState } from './battle.js';
 import { aiStep, createAi, DEFAULT_STRATEGY, type AiConfig } from './ai.js';
 import type { Side } from './units.js';
+import { UNIT_IDS } from './units.js';
+import type { Upgrades } from './upgrades.js';
 
 /** Small deterministic PRNG (mulberry32). */
 export function rng(seed: number): () => number {
@@ -20,6 +22,14 @@ export interface SimPlayer {
   /** probability of a correct answer */
   accuracy: number;
   strategy?: string[];
+  upgrades?: Upgrades;
+}
+
+/** Same level on every track of every unit — what a player who has cleared ~10*level stages might own. */
+export function uniformUpgrades(level: number): Upgrades {
+  const up: Upgrades = {};
+  for (const id of UNIT_IDS) up[id] = { hp: level, atk: level, special: level };
+  return up;
 }
 
 export interface SimResult {
@@ -35,7 +45,7 @@ export interface SimResult {
  */
 export function simulateMatch(left: SimPlayer, right: SimPlayer | AiConfig, seed = 1, maxSeconds = 600): SimResult {
   const rand = rng(seed);
-  const state = createBattle();
+  const state = createBattle({ left: left.upgrades, right: 'upgrades' in right ? right.upgrades : undefined });
   const players: { side: Side; p: SimPlayer; nextAt: number; idx: number }[] = [{ side: 'left', p: left, nextAt: 0, idx: 0 }];
   let ai = null as ReturnType<typeof createAi> | null;
   if ('scorePerSec' in right) ai = createAi('right', right);

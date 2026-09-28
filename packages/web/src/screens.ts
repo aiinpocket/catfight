@@ -101,7 +101,7 @@ export async function stagesScreen(ctx: Ctx) {
     const b = document.createElement('button');
     b.className = 'list-btn card';
     b.disabled = !st.unlocked;
-    b.innerHTML = `<div class="pill">${st.id}</div><div class="grow"><div class="title">${escapeHtml(st.name)} ${st.cleared ? '✅' : ''}</div><div class="meta">首次通關 +${st.reward} 點 ・ 對手強度 ${st.ai.scorePerSec.toFixed(1)}</div></div>`;
+    b.innerHTML = `<div class="pill">${st.id}</div><img src="/assets/boss/${st.boss.unitId}.png" alt="" onerror="this.style.visibility='hidden'"><div class="grow"><div class="title">${escapeHtml(st.name)} ・ ${escapeHtml(st.boss.name)} ${st.cleared ? '✅' : ''}</div><div class="meta">${escapeHtml(st.boss.desc)}<br>首次通關 +${st.reward} 點 ・ 對手強度 ${st.ai.scorePerSec.toFixed(1)}</div></div>`;
     b.addEventListener('click', () => startStage(ctx, st));
     list.appendChild(b);
   }
@@ -109,7 +109,7 @@ export async function stagesScreen(ctx: Ctx) {
 
 async function startStage(ctx: Ctx, st: StageInfo) {
   for (;;) {
-    const r = await runBattle(ctx.root, { mode: 'stage', category: st.category, stage: st.id, opponentName: `第 ${st.id} 關 ${st.name}`, ai: st.ai, me: ctx.me! });
+    const r = await runBattle(ctx.root, { mode: 'stage', category: st.category, stage: st.id, opponentName: `第 ${st.id} 關 ${st.boss.name}`, ai: st.ai, me: ctx.me!, boss: st.boss });
     if (r.outcome) ctx.me = r.outcome.me;
     if (!r.retry) break;
   }

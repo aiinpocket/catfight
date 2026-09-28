@@ -102,6 +102,7 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
       category: s.category,
       reward: s.reward,
       ai: s.ai,
+      boss: s.boss,
       unlocked: s.id <= maxStage + 1,
       cleared: s.id <= maxStage,
     }));

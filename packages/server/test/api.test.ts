@@ -97,10 +97,19 @@ describe('categories, questions and stages', () => {
   });
 
   it('builds stages by cycling categories that have questions', async () => {
-    const st = (await app.inject({ method: 'GET', url: '/api/stages', headers: H(tokenA) })).json() as { id: number; category: string; unlocked: boolean; ai: { scorePerSec: number } }[];
-    expect(st.length).toBe(2 * 5);
+    const st = (await app.inject({ method: 'GET', url: '/api/stages', headers: H(tokenA) })).json() as {
+      id: number;
+      category: string;
+      unlocked: boolean;
+      ai: { scorePerSec: number; boss: { unitId: string } };
+      boss: { name: string; desc: string };
+    }[];
+    expect(st.length).toBe(100);
     expect(st.map((s) => s.category).slice(0, 4)).toEqual(['finance_basics', 'security', 'finance_basics', 'security']);
-    expect(st[2].ai.scorePerSec).toBeGreaterThan(st[0].ai.scorePerSec);
+    expect(st[20].ai.scorePerSec).toBeGreaterThan(st[0].ai.scorePerSec);
+    expect(st[6].boss.name).toBe('真田幸村喵');
+    expect(st[6].ai.boss.unitId).toBe('boss_7');
+    expect(st[7].boss.desc).toContain('貫穿');
     expect(st[0].unlocked).toBe(true);
     expect(st[1].unlocked).toBe(false);
   });

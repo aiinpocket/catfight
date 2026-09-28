@@ -1,4 +1,4 @@
-import { simulateMatch, stageAi, type SimPlayer } from '../src/index.js';
+import { simulateMatch, stageAi, uniformUpgrades, type SimPlayer } from '../src/index.js';
 
 function pct(xs: number[], p: number) {
   const s = [...xs].sort((a, b) => a - b);
@@ -19,13 +19,15 @@ console.log(`left win   ${(rs.filter((r) => r.winner === 'left').length / N * 10
 console.log(`\n== stage curve (avg player, 200 matches each) ==`);
 const weak: SimPlayer = { secPerQuestion: 6, accuracy: 0.55, strategy: ['tank', 'archer'] };
 const strong: SimPlayer = { secPerQuestion: 3, accuracy: 0.85 };
-for (const id of [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 15]) {
+for (const id of [1, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]) {
   const st = { id, name: String(id), ai: stageAi(id) };
-  const row = [weak, avg, strong].map((p) => {
+  const lvl = Math.min(10, Math.round(id / 10));
+  const row = [weak, avg, strong].map((p0) => {
+    const p = { ...p0, upgrades: uniformUpgrades(lvl) };
     const r = Array.from({ length: 200 }, (_, i) => simulateMatch(p, st.ai, i + 1));
     const win = r.filter((x) => x.winner === 'left').length / 2;
     const q = pct(r.map((x) => x.questions.left), 0.5);
     return `${win.toFixed(0).padStart(3)}% (${q}q)`;
   });
-  console.log(`stage ${st.id} ${st.name.padEnd(6)} weak ${row[0]}  avg ${row[1]}  strong ${row[2]}`);
+  console.log(`stage ${String(st.id).padStart(3)} lv${lvl}  weak ${row[0]}  avg ${row[1]}  strong ${row[2]}`);
 }

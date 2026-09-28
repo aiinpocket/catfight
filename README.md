@@ -3,7 +3,7 @@
 答題賺分數、召喚貓咪推塔的單線塔防遊戲。手機直向瀏覽器優先，桌面可玩，可加到主畫面（PWA）。
 
 - 上半：Phaser 戰場。下半：持續出現的四選一金融題。答對 +10 分（分析師貓在場 +5），分數用來召喚單位。
-- **關卡模式**：關卡依題庫分類輪流出現（A、B、C、A、B、C…），同分類再出現時對手更強；首次通關給點數解鎖新貓咪。
+- **關卡模式**：100 關，分類依題庫輪流出現（A、B、C、A、B、C…），對手強度隨關卡遞增；每關有一隻戰國名將喵 BOSS，各有專屬技能（雜賀喵定點貫穿狙擊、真田喵同目標疊傷……）。首次通關給點數解鎖與強化貓咪。
 - **對戰模式**：選題型配對其他玩家，對手的「每秒得分效率」轉成 AI 出兵速度；勝 +25 / 負 −15 積分，有排行榜。
 
 ## 專案結構
@@ -48,6 +48,22 @@ cd packages/web && npx playwright install chromium && npx playwright test
 - 每場都從分類中隨機抽題，**選項順序每次送出都重新洗牌**。
 
 ⚠ 放考古題前請注意著作權，正式營運建議改寫或取得授權。
+
+## BOSS
+
+`packages/engine/src/bosses.ts`：100 隻名將喵的名稱、外觀提示、技能種類與屬性型態；數值隨關卡自動縮放（`BOSS_TUNE` 可整體調整血量／攻擊倍率，`STAGE_TUNE` 調 AI 收入曲線與 BOSS 復活關卡）。
+19 種技能：狙擊貫穿、同目標疊傷、衝鋒首擊、護甲、回血、召喚、減攻速光環、擊退、閃避、狂暴、殘血強化、吸血、破城、偷分、處決、死後分裂、治療友軍、範圍攻擊、復活一次。
+BOSS 由 AI 在 `stageAi(n).boss.atMs` 免費派出（60 秒 → 25 秒），第 80 關起死後 75 秒復活。
+圖片：`python tools/gen_bosses.py <bosses.json>`（先用 engine 把 `BOSS_LIST` 匯出成 JSON），輸出 `packages/web/public/assets/boss/boss_<n>.png`。
+
+## 匯入金研院考古題
+
+```bash
+python tools/tabf_import.py --dir <放 PDF 的目錄> --ids 663415,644264,617843   --category family_trust --name 家族信託規劃顧問 --sort 1 --out data/questions/family_trust.json
+```
+
+每個測驗編號需要 `<id>-1.pdf`、`<id>-2.pdf`（兩節試題）與 `<id>-3.pdf`（答案）。複選題與解析失敗的題目會列出並略過。
+`bash deploy/deploy.sh` 會把 `data/questions/*.json` 一併上傳到 VM。
 
 ## 強化系統
 

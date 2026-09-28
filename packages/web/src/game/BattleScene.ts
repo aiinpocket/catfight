@@ -5,6 +5,10 @@ export interface BattleDriver {
   /** advance the game by one fixed tick */
   tick(): void;
   state: BattleState;
+  /** boss unit id for this battle (sprite is loaded from /assets/boss/<id>.png) */
+  bossId?: string;
+  /** called with each engine event batch after a tick (toasts etc.) */
+  onEvents?: (events: BattleState['events']) => void;
 }
 
 const UNIT_KEYS = Object.keys(UNITS);
@@ -29,6 +33,7 @@ export class BattleScene extends Phaser.Scene {
 
   preload() {
     for (const k of UNIT_KEYS) this.load.image(k, `/assets/${k}.png`);
+    if (this.driver.bossId) this.load.image(this.driver.bossId, `/assets/boss/${this.driver.bossId}.png`);
     this.load.image('tower_player', '/assets/tower_player.png');
     this.load.image('tower_enemy', '/assets/tower_enemy.png');
     this.load.image('background', '/assets/background.png');
@@ -59,6 +64,7 @@ export class BattleScene extends Phaser.Scene {
     while (this.acc >= TICK_MS) {
       this.acc -= TICK_MS;
       this.driver.tick();
+      if (this.driver.onEvents && this.driver.state.events.length) this.driver.onEvents(this.driver.state.events);
     }
     this.render(time);
   }
@@ -70,8 +76,12 @@ export class BattleScene extends Phaser.Scene {
       alive.add(e.id);
       let s = this.sprites.get(e.id);
       if (!s) {
-        const img = this.add.image(this.fx(e.x), this.groundY, e.unitId).setOrigin(0.5, 1).setScale(this.unitScale);
-        if (e.side === 'right') img.setFlipX(true).setTint(0xffc9c9);
+        const boss = e.unitId.startsWith('boss_');
+        const key = this.textures.exists(e.unitId) ? e.unitId : 'tank';
+        const img = this.add.image(this.fx(e.x), this.groundY, key).setOrigin(0.5, 1).setScale(this.unitScale * (boss ? 1.6 : 1));
+        // boss art already faces left; regular sprites face right
+        if (e.side === 'right' && !boss) img.setFlipX(true).setTint(0xffc9c9);
+        if (e.side === 'left' && boss) img.setFlipX(true);
         s = { img, hp: this.add.graphics() };
         this.sprites.set(e.id, s);
       }
@@ -95,10 +105,12 @@ export class BattleScene extends Phaser.Scene {
     const jitter = (e.id % 3) * 5;
     s.img.setPosition(this.fx(e.x) + lunge + (e.side === 'left' ? -jitter : jitter), this.groundY - bob);
     s.img.setDepth(10 + (e.side === 'left' ? e.x : FIELD_LENGTH - e.x) / 100);
-    if (e.hit) s.img.setTint(0xffffff);
-    else if (e.side === 'right') s.img.setTint(0xffc9c9);
+    const boss = e.unitId.startsWith('boss_');
+    if (e.special) s.img.setTint(0xffe066);
+    else if (e.hit) s.img.setTint(0xffffff);
+    else if (e.side === 'right' && !boss) s.img.setTint(0xffc9c9);
     else s.img.clearTint();
-    const w = 36;
+    const w = boss ? 60 : 36;
     const h = s.img.displayHeight;
     s.hp.clear();
     s.hp.setDepth(50);

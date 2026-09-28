@@ -25,6 +25,7 @@ export interface BattleSetup {
   opponentName: string;
   ai: AiConfig;
   me: Me;
+  boss?: { unitId: string; name: string; desc: string };
 }
 
 export interface BattleOutcome {
@@ -102,8 +103,18 @@ export function runBattle(root: HTMLElement, setup: BattleSetup): Promise<{ outc
     });
     wrap.appendChild(quiz.el);
 
+    const bossNames = new Map<string, string>();
+    if (setup.boss) bossNames.set(setup.boss.unitId, setup.boss.name);
     const driver = {
       state,
+      bossId: setup.boss?.unitId,
+      onEvents(events: BattleState['events']) {
+        for (const ev of events) {
+          if (ev.type === 'spawn' && ev.unitId.startsWith('boss_')) toast(wrap, `BOSS 登場：${bossNames.get(ev.unitId) ?? ev.unitId}`);
+          if (ev.type === 'death' && ev.unitId.startsWith('boss_')) toast(wrap, `擊敗 ${bossNames.get(ev.unitId) ?? 'BOSS'}！`);
+          if (ev.type === 'special' && ev.kind === 'lastStand') toast(wrap, `${bossNames.get(ev.unitId) ?? 'BOSS'} 復活了！`);
+        }
+      },
       tick() {
         if (finished) return;
         aiStep(state, ai, TICK_MS);

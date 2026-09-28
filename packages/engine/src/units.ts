@@ -14,6 +14,10 @@ export interface UnitDef {
   aura?: { type: AuraType; value: number };
   /** points needed to unlock in stage mode; 0 = default */
   unlockCost: number;
+  /** seconds between hits (default ATTACK_INTERVAL) */
+  attackInterval?: number;
+  /** boss special ability (bosses only) */
+  boss?: import('./bosses.js').BossAbility;
 }
 
 export const UNITS: Record<string, UnitDef> = {

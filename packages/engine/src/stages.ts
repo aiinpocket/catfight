@@ -1,4 +1,5 @@
 import type { AiConfig } from './ai.js';
+import { BOSS_COUNT, bossDef, bossId } from './bosses.js';
 
 export interface StageDef {
   id: number;
@@ -7,10 +8,13 @@ export interface StageDef {
   ai: AiConfig;
   /** points granted on first clear */
   reward: number;
+  boss: { unitId: string; name: string; desc: string; hp: number; dps: number; range: number };
 }
 
-/** How many times the category list cycles before the stage list ends. */
-export const STAGE_ROUNDS = 5;
+/** Total number of stages. */
+export const STAGE_COUNT = BOSS_COUNT;
+/** AI income curve knobs: scorePerSec = base + gain * t^pow */
+export const STAGE_TUNE = { base: 0.5, gain: 2.5, pow: 1.8, respawnFrom: 80, respawnMs: 75_000 };
 
 const STRATEGIES: string[][] = [
   ['tank', 'tank', 'archer'],
@@ -24,15 +28,21 @@ const STRATEGIES: string[][] = [
 ];
 
 /**
- * AI difficulty for stage n (1-based). Score income grows linearly and is capped,
- * warm-up shrinks, the spawn strategy gets richer.
- * n=1 -> 0.5/s (weak players win ~95%), n=15 -> ~3.0/s (average players win ~30%).
+ * AI difficulty for stage n (1..100). Score income rises smoothly (0.5/s -> ~4.5/s),
+ * warm-up shrinks, the spawn strategy gets richer, and the stage boss shows up earlier
+ * (and comes back once more in the late game).
  */
 export function stageAi(n: number): AiConfig {
-  const scorePerSec = Math.min(3.5, +(0.5 + (n - 1) * 0.18).toFixed(2));
-  const warmupMs = Math.max(0, 8000 - (n - 1) * 1000);
-  const strategy = STRATEGIES[Math.min(STRATEGIES.length - 1, Math.floor((n - 1) / 2))];
-  return { scorePerSec, strategy, warmupMs };
+  const t = Math.min(1, Math.max(0, (n - 1) / (STAGE_COUNT - 1)));
+  const scorePerSec = +(STAGE_TUNE.base + STAGE_TUNE.gain * Math.pow(t, STAGE_TUNE.pow)).toFixed(2);
+  const warmupMs = Math.round(Math.max(0, 8000 - 8000 * t));
+  const strategy = STRATEGIES[Math.min(STRATEGIES.length - 1, Math.floor(t * STRATEGIES.length))];
+  return {
+    scorePerSec,
+    strategy,
+    warmupMs,
+    boss: { unitId: bossId(n), atMs: Math.round(60_000 - 35_000 * t), respawnMs: n >= STAGE_TUNE.respawnFrom ? STAGE_TUNE.respawnMs : 0 },
+  };
 }
 
 export function stageReward(n: number): number {
@@ -42,15 +52,21 @@ export function stageReward(n: number): number {
 /**
  * Build the stage list from the category order stored in the database:
  * stage n uses categories[(n-1) % categories.length], so the same bank comes back
- * every full cycle at a higher difficulty.
+ * every full cycle at a higher difficulty. Each stage has its own warlord boss.
  */
-export function buildStages(categories: { id: string; name: string }[], rounds = STAGE_ROUNDS): StageDef[] {
+export function buildStages(categories: { id: string; name: string }[], count = STAGE_COUNT): StageDef[] {
   if (!categories.length) return [];
-  return Array.from({ length: categories.length * rounds }, (_, i) => {
+  return Array.from({ length: count }, (_, i) => {
     const n = i + 1;
     const cat = categories[i % categories.length];
-    const round = Math.floor(i / categories.length) + 1;
-    const stars = round > 1 ? ` ${'★'.repeat(Math.min(round - 1, 4))}` : '';
-    return { id: n, name: `${cat.name}${stars}`, category: cat.id, ai: stageAi(n), reward: stageReward(n) };
+    const b = bossDef(n);
+    return {
+      id: n,
+      name: cat.name,
+      category: cat.id,
+      ai: stageAi(n),
+      reward: stageReward(n),
+      boss: { unitId: b.id, name: b.name, desc: b.desc, hp: b.hp, dps: b.dps, range: b.range },
+    };
   });
 }
