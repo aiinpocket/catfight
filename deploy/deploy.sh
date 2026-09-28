@@ -31,13 +31,15 @@ ssh_vm "set -e
     sudo usermod -aG docker \$USER
   fi
   cd $REMOTE_DIR
-  mkdir -p volumes/data volumes/caddy
+  mkdir -p volumes/postgres volumes/caddy data/questions
   tar xzf /tmp/catfight.tgz
   if [ ! -f .env ]; then
     echo \"JWT_SECRET=\$(head -c 48 /dev/urandom | base64 | tr -d '/+=')\" > .env
+    echo \"POSTGRES_PASSWORD=\$(head -c 24 /dev/urandom | base64 | tr -d '/+=')\" >> .env
     echo \"SITE_ADDRESS=:80\" >> .env
     echo 'created .env with a fresh JWT_SECRET'
   fi
+  grep -q '^POSTGRES_PASSWORD=' .env || echo \"POSTGRES_PASSWORD=\$(head -c 24 /dev/urandom | base64 | tr -d '/+=')\" >> .env
   sudo docker compose up -d --build
   sudo docker image prune -f >/dev/null
   sudo docker compose ps"

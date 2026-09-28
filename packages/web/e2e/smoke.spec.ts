@@ -15,7 +15,17 @@ test('register, play a stage, answer, summon', async ({ page }) => {
 
   await expect(page.getByText('關卡模式')).toBeVisible();
   await page.getByText('關卡模式').click();
-  await page.getByText('櫃檯實習').click();
+
+  // with an empty question bank the stage list shows a hint and the test ends here
+  const first = page.locator('#list .list-btn').first();
+  const empty = page.getByText('題庫還是空的');
+  await expect(first.or(empty)).toBeVisible();
+  if (await empty.isVisible()) return;
+  const category = await page.evaluate(async (t) => {
+    const st = await (await fetch('/api/stages', { headers: { authorization: `Bearer ${t}` } })).json();
+    return st[0].category as string;
+  }, await page.evaluate(() => localStorage.getItem('catfight.token')));
+  await first.click();
 
   // battle mounted: canvas + quiz
   await expect(page.locator('.battle-top canvas')).toBeVisible();
@@ -23,19 +33,24 @@ test('register, play a stage, answer, summon', async ({ page }) => {
 
   // answer correctly using the API as the oracle (the UI never reveals the answer before choosing)
   const token = await page.evaluate(() => localStorage.getItem('catfight.token'));
-  const qs = (await (await page.request.get('/api/questions?category=finance_basics&limit=100', { headers: { authorization: `Bearer ${token}` } })).json()) as {
+  const qs = (await (await page.request.get(`/api/questions?category=${category}&limit=100`, { headers: { authorization: `Bearer ${token}` } })).json()) as {
     text: string;
+    options: string[];
     answerIndex: number;
   }[];
-  const answers = new Map(qs.map((q) => [q.text, q.answerIndex]));
+  // options are shuffled on every delivery, so key the oracle by the correct option's text
+  const answers = new Map(qs.map((q) => [q.text, q.options[q.answerIndex]]));
 
   let score = 0;
   for (let i = 0; i < 3; i++) {
     const text = (await page.locator('.q-text').textContent())!.trim();
-    const idx = answers.get(text);
-    expect(idx, `unknown question: ${text}`).not.toBeUndefined();
-    await page.locator('.opt').nth(idx!).click();
-    await expect(page.locator('.opt').nth(idx!)).toHaveClass(/correct/);
+    const correct = answers.get(text);
+    expect(correct, `unknown question: ${text}`).not.toBeUndefined();
+    const shown = await page.locator('.opt span').allTextContents();
+    const idx = shown.indexOf(correct!);
+    expect(idx).toBeGreaterThanOrEqual(0);
+    await page.locator('.opt').nth(idx).click();
+    await expect(page.locator('.opt').nth(idx)).toHaveClass(/correct/);
     score += 10;
     await expect(page.locator('#score')).toHaveText(String(score));
     await page.waitForTimeout(400);

@@ -3,3 +3,4 @@ dist/
 volumes/
 *.db
 .env
+data/questions/*.json

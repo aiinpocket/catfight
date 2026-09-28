@@ -18,16 +18,12 @@ COPY package.json package-lock.json ./
 COPY packages/engine/package.json packages/engine/
 COPY packages/server/package.json packages/server/
 COPY packages/web/package.json packages/web/
-# build tools are needed for better-sqlite3 native module only if no prebuilt binary matches
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ && rm -rf /var/lib/apt/lists/* \
-  && npm ci --omit=dev --workspace @catfight/server --workspace @catfight/engine \
-  && apt-get purge -y python3 make g++ && apt-get autoremove -y
+RUN npm ci --omit=dev --workspace @catfight/server --workspace @catfight/engine
 COPY packages/engine ./packages/engine
 COPY packages/server ./packages/server
 COPY --from=build /app/packages/web/dist ./packages/web/dist
-COPY data/questions ./data/questions
+RUN mkdir -p ./data/questions
 ENV PORT=8080 \
-    DATA_DIR=/data \
     WEB_DIR=/app/packages/web/dist \
     QUESTIONS_DIR=/app/data/questions
 EXPOSE 8080

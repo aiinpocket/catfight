@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { simulateMatch, STAGES, type SimPlayer } from '../src/index.js';
+import { buildStages, simulateMatch, stageAi, type SimPlayer } from '../src/index.js';
 
 const avg: SimPlayer = { secPerQuestion: 4, accuracy: 0.7 };
 
@@ -33,12 +33,20 @@ describe('balance: two average players', () => {
 });
 
 describe('balance: stage curve', () => {
-  it('stage 1 is beatable by a weak player, stage 8 is hard for an average one', () => {
+  it('stage 1 is beatable by a weak player, stage 15 is hard for an average one', () => {
     const weak: SimPlayer = { secPerQuestion: 6, accuracy: 0.55, strategy: ['tank', 'archer'] };
-    const w1 = Array.from({ length: 100 }, (_, i) => simulateMatch(weak, STAGES[0].ai, i + 1)).filter((r) => r.winner === 'left').length;
+    const w1 = Array.from({ length: 100 }, (_, i) => simulateMatch(weak, stageAi(1), i + 1)).filter((r) => r.winner === 'left').length;
     expect(w1).toBeGreaterThan(60);
-    const w8 = Array.from({ length: 100 }, (_, i) => simulateMatch(avg, STAGES[7].ai, i + 1)).filter((r) => r.winner === 'left').length;
+    const w8 = Array.from({ length: 100 }, (_, i) => simulateMatch(avg, stageAi(15), i + 1)).filter((r) => r.winner === 'left').length;
     expect(w8).toBeLessThan(50);
     expect(w8).toBeGreaterThan(5);
+  });
+
+  it('difficulty is monotonic and cycles categories', () => {
+    for (let n = 1; n < 20; n++) expect(stageAi(n + 1).scorePerSec).toBeGreaterThanOrEqual(stageAi(n).scorePerSec);
+    const st = buildStages([{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }, { id: 'c', name: 'C' }], 2);
+    expect(st.map((s) => s.category)).toEqual(['a', 'b', 'c', 'a', 'b', 'c']);
+    expect(st[3].ai.scorePerSec).toBeGreaterThan(st[0].ai.scorePerSec);
+    expect(buildStages([])).toEqual([]);
   });
 });

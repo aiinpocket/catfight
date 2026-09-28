@@ -3,8 +3,8 @@ import cors from '@fastify/cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import { CATEGORY_IDS, DEFAULT_SCORE_PER_SEC, STAGES, UNITS } from '@catfight/engine';
-import { createUserRows, type DB, type QuestionRow } from './db.js';
+import { buildStages, DEFAULT_SCORE_PER_SEC, UNITS } from '@catfight/engine';
+import { createUserRows, listCategories, type DB } from './db.js';
 
 export interface AppOptions {
   db: DB;
@@ -16,9 +16,21 @@ interface JwtPayload {
   uid: number;
 }
 
+interface QuestionRow {
+  id: number;
+  category: string;
+  text: string;
+  options: string[] | string;
+  answer_index: number;
+  explanation: string | null;
+}
+
 const usernameSchema = z.string().regex(/^[A-Za-z0-9_]{3,20}$/);
 const passwordSchema = z.string().min(8).max(72);
 const displaySchema = z.string().trim().min(1).max(20);
+const categorySchema = z.string().regex(/^[a-z0-9_\-]{1,40}$/);
+
+const httpError = (statusCode: number, message: string) => Object.assign(new Error(message), { statusCode });
 
 export function buildApp({ db, jwtSecret, logger = false }: AppOptions): FastifyInstance {
   const app = Fastify({ logger });
@@ -30,40 +42,46 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
     const h = req.headers.authorization ?? '';
     const token = h.startsWith('Bearer ') ? h.slice(7) : '';
     try {
-      const p = jwt.verify(token, jwtSecret) as JwtPayload;
-      return p.uid;
+      return (jwt.verify(token, jwtSecret) as JwtPayload).uid;
     } catch {
-      throw Object.assign(new Error('unauthorized'), { statusCode: 401 });
+      throw httpError(401, 'unauthorized');
     }
   }
 
+  async function requireCategory(id: string) {
+    const r = await db.query('SELECT 1 FROM categories WHERE id = $1', [id]);
+    if (!r.rows.length) throw httpError(400, '沒有這個題庫分類');
+  }
+
   app.setErrorHandler((err, _req, reply) => {
-    const e = err as { statusCode?: number; message?: string; validation?: unknown };
+    const e = err as { statusCode?: number; message?: string };
     if (e instanceof z.ZodError) return reply.status(400).send({ error: 'invalid input', issues: e.issues });
+    if (!e.statusCode || e.statusCode >= 500) app.log.error(err);
     reply.status(e.statusCode ?? 500).send({ error: e.message ?? 'error' });
   });
 
-  app.get('/api/health', async () => ({ ok: true }));
+  app.get('/api/health', async () => {
+    await db.query('SELECT 1');
+    return { ok: true };
+  });
 
   // ---------- auth ----------
   app.post('/api/auth/register', async (req, reply) => {
     const body = z.object({ username: usernameSchema, displayName: displaySchema, password: passwordSchema }).parse(req.body);
-    const exists = db.prepare('SELECT 1 FROM users WHERE username = ?').get(body.username.toLowerCase());
-    if (exists) return reply.status(409).send({ error: '帳號已被使用' });
+    const username = body.username.toLowerCase();
+    const exists = await db.query('SELECT 1 FROM users WHERE username = $1', [username]);
+    if (exists.rows.length) return reply.status(409).send({ error: '帳號已被使用' });
     const hash = await bcrypt.hash(body.password, 12);
-    const uid = createUserRows(db, body.username.toLowerCase(), body.displayName, hash);
-    return { token: sign(uid), me: getMe(db, uid) };
+    const uid = await createUserRows(db, username, body.displayName, hash);
+    return { token: sign(uid), me: await getMe(db, uid) };
   });
 
   app.post('/api/auth/login', async (req, reply) => {
     const body = z.object({ username: z.string(), password: z.string() }).parse(req.body);
-    const row = db.prepare('SELECT id, password_hash FROM users WHERE username = ?').get(body.username.toLowerCase()) as
-      | { id: number; password_hash: string }
-      | undefined;
-    if (!row || !(await bcrypt.compare(body.password, row.password_hash))) {
-      return reply.status(401).send({ error: '帳號或密碼錯誤' });
-    }
-    return { token: sign(row.id), me: getMe(db, row.id) };
+    const r = await db.query<{ id: number; password_hash: string }>('SELECT id, password_hash FROM users WHERE username = $1', [body.username.toLowerCase()]);
+    const row = r.rows[0];
+    if (!row || !(await bcrypt.compare(body.password, row.password_hash))) return reply.status(401).send({ error: '帳號或密碼錯誤' });
+    return { token: sign(row.id), me: await getMe(db, row.id) };
   });
 
   app.get('/api/me', async (req) => getMe(db, auth(req)));
@@ -71,39 +89,57 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
   // ---------- content ----------
   app.get('/api/units', async () => Object.values(UNITS));
 
+  app.get('/api/categories', async () => listCategories(db));
+
   app.get('/api/stages', async (req) => {
     const uid = auth(req);
-    const prog = db.prepare('SELECT max_stage FROM user_progress WHERE user_id = ?').get(uid) as { max_stage: number };
-    return STAGES.map((s) => ({ id: s.id, name: s.name, category: s.category, reward: s.reward, unlocked: s.id <= prog.max_stage + 1, cleared: s.id <= prog.max_stage }));
+    const prog = await db.query<{ max_stage: number }>('SELECT max_stage FROM user_progress WHERE user_id = $1', [uid]);
+    const maxStage = prog.rows[0]?.max_stage ?? 0;
+    const cats = (await listCategories(db)).filter((c) => c.count > 0);
+    return buildStages(cats).map((s) => ({
+      id: s.id,
+      name: s.name,
+      category: s.category,
+      reward: s.reward,
+      ai: s.ai,
+      unlocked: s.id <= maxStage + 1,
+      cleared: s.id <= maxStage,
+    }));
   });
 
   app.get('/api/questions', async (req) => {
     auth(req);
     const q = z
       .object({
-        category: z.enum(CATEGORY_IDS as [string, ...string[]]),
+        category: categorySchema,
         limit: z.coerce.number().int().min(1).max(100).default(50),
         exclude: z.string().optional(),
       })
       .parse(req.query);
+    await requireCategory(q.category);
     const exclude = (q.exclude ?? '')
       .split(',')
       .map((s) => Number(s))
       .filter((n) => Number.isInteger(n) && n > 0);
-    let rows = db
-      .prepare(
-        `SELECT * FROM questions WHERE category = ? ${exclude.length ? `AND id NOT IN (${exclude.map(() => '?').join(',')})` : ''} ORDER BY RANDOM() LIMIT ?`,
+    let rows = (
+      await db.query<QuestionRow>(
+        `SELECT id, category, text, options, answer_index, explanation FROM questions
+         WHERE category = $1 AND NOT (id = ANY($2::int[])) ORDER BY random() LIMIT $3`,
+        [q.category, exclude, q.limit],
       )
-      .all(q.category, ...exclude, q.limit) as QuestionRow[];
-    // if the bank is smaller than the request, top up with excluded ones
+    ).rows;
     if (rows.length < q.limit) {
-      const more = db
-        .prepare('SELECT * FROM questions WHERE category = ? ORDER BY RANDOM() LIMIT ?')
-        .all(q.category, q.limit - rows.length) as QuestionRow[];
+      // bank smaller than the request: top up with previously seen questions
       const seen = new Set(rows.map((r) => r.id));
+      const more = (
+        await db.query<QuestionRow>('SELECT id, category, text, options, answer_index, explanation FROM questions WHERE category = $1 ORDER BY random() LIMIT $2', [
+          q.category,
+          q.limit - rows.length,
+        ])
+      ).rows;
       rows = rows.concat(more.filter((r) => !seen.has(r.id)));
     }
-    return rows.map(toQuestion);
+    return rows.map(shuffledQuestion);
   });
 
   // ---------- progression ----------
@@ -112,30 +148,31 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
     const { unitId } = z.object({ unitId: z.string() }).parse(req.body);
     const def = UNITS[unitId];
     if (!def) return reply.status(404).send({ error: 'no such unit' });
-    const prog = db.prepare('SELECT points, unlocked_units FROM user_progress WHERE user_id = ?').get(uid) as { points: number; unlocked_units: string };
-    const unlocked: string[] = JSON.parse(prog.unlocked_units);
-    if (unlocked.includes(unitId)) return getMe(db, uid);
-    if (prog.points < def.unlockCost) return reply.status(400).send({ error: '點數不足' });
-    unlocked.push(unitId);
-    db.prepare('UPDATE user_progress SET points = points - ?, unlocked_units = ? WHERE user_id = ?').run(def.unlockCost, JSON.stringify(unlocked), uid);
-    return getMe(db, uid);
+    return db.tx(async (q) => {
+      const prog = (await q<{ points: number; unlocked_units: string[] }>('SELECT points, unlocked_units FROM user_progress WHERE user_id = $1 FOR UPDATE', [uid])).rows[0];
+      const unlocked = prog.unlocked_units;
+      if (unlocked.includes(unitId)) return getMe(db, uid, q);
+      if (prog.points < def.unlockCost) throw httpError(400, '點數不足');
+      unlocked.push(unitId);
+      await q('UPDATE user_progress SET points = points - $1, unlocked_units = $2 WHERE user_id = $3', [def.unlockCost, JSON.stringify(unlocked), uid]);
+      return getMe(db, uid, q);
+    });
   });
 
   // ---------- versus ----------
   app.post('/api/match/opponent', async (req) => {
     const uid = auth(req);
-    const { category } = z.object({ category: z.enum(CATEGORY_IDS as [string, ...string[]]) }).parse(req.body ?? {});
-    const cand = db
-      .prepare(
-        `SELECT s.user_id, u.display_name, s.total_score, s.total_seconds, r.rating
-         FROM user_stats s JOIN users u ON u.id = s.user_id JOIN ratings r ON r.user_id = s.user_id
-         WHERE s.category = ? AND s.user_id != ? AND s.total_seconds > 30
-         ORDER BY RANDOM() LIMIT 1`,
-      )
-      .get(category, uid) as { user_id: number; display_name: string; total_score: number; total_seconds: number; rating: number } | undefined;
-    if (!cand) {
-      return { opponentId: null, displayName: '練習機器人', scorePerSec: DEFAULT_SCORE_PER_SEC, rating: 1000 };
-    }
+    const { category } = z.object({ category: categorySchema }).parse(req.body ?? {});
+    await requireCategory(category);
+    const r = await db.query<{ user_id: number; display_name: string; total_score: number; total_seconds: number; rating: number }>(
+      `SELECT s.user_id, u.display_name, s.total_score, s.total_seconds, r.rating
+       FROM user_stats s JOIN users u ON u.id = s.user_id JOIN ratings r ON r.user_id = s.user_id
+       WHERE s.category = $1 AND s.user_id <> $2 AND s.total_seconds > 30
+       ORDER BY random() LIMIT 1`,
+      [category, uid],
+    );
+    const cand = r.rows[0];
+    if (!cand) return { opponentId: null, displayName: '練習機器人', scorePerSec: DEFAULT_SCORE_PER_SEC, rating: 1000 };
     return { opponentId: cand.user_id, displayName: cand.display_name, scorePerSec: cand.total_score / cand.total_seconds, rating: cand.rating };
   });
 
@@ -144,8 +181,8 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
     const body = z
       .object({
         mode: z.enum(['stage', 'versus']),
-        category: z.enum(CATEGORY_IDS as [string, ...string[]]),
-        stage: z.number().int().min(1).max(STAGES.length).optional(),
+        category: categorySchema,
+        stage: z.number().int().min(1).optional(),
         opponentId: z.number().int().nullable().optional(),
         won: z.boolean(),
         score: z.number().int().min(0),
@@ -156,81 +193,109 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
       .parse(req.body);
     if (body.correct > body.questions) return reply.status(400).send({ error: 'bad stats' });
     if (body.mode === 'stage' && !body.stage) return reply.status(400).send({ error: 'stage required' });
+    await requireCategory(body.category);
 
-    const out = db.transaction(() => {
-      db.prepare(
-        'INSERT INTO match_results (user_id, mode, category, stage, opponent_id, won, score, seconds, questions, correct) VALUES (?,?,?,?,?,?,?,?,?,?)',
-      ).run(uid, body.mode, body.category, body.stage ?? null, body.opponentId ?? null, body.won ? 1 : 0, body.score, body.seconds, body.questions, body.correct);
-      db.prepare(
-        `INSERT INTO user_stats (user_id, category, games, wins, total_score, total_seconds, questions, correct) VALUES (?,?,1,?,?,?,?,?)
-         ON CONFLICT(user_id, category) DO UPDATE SET games = games + 1, wins = wins + excluded.wins,
-           total_score = total_score + excluded.total_score, total_seconds = total_seconds + excluded.total_seconds,
-           questions = questions + excluded.questions, correct = correct + excluded.correct`,
-      ).run(uid, body.category, body.won ? 1 : 0, body.score, body.seconds, body.questions, body.correct);
+    const cats = (await listCategories(db)).filter((c) => c.count > 0);
+    const stages = buildStages(cats);
+    if (body.mode === 'stage' && (body.stage! > stages.length || stages[body.stage! - 1].category !== body.category)) {
+      return reply.status(400).send({ error: 'stage/category mismatch' });
+    }
 
+    const out = await db.tx(async (q) => {
+      await q(
+        `INSERT INTO match_results (user_id, mode, category, stage, opponent_id, won, score, seconds, questions, correct)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [uid, body.mode, body.category, body.stage ?? null, body.opponentId ?? null, body.won, body.score, body.seconds, body.questions, body.correct],
+      );
+      await q(
+        `INSERT INTO user_stats (user_id, category, games, wins, total_score, total_seconds, questions, correct) VALUES ($1,$2,1,$3,$4,$5,$6,$7)
+         ON CONFLICT (user_id, category) DO UPDATE SET games = user_stats.games + 1, wins = user_stats.wins + EXCLUDED.wins,
+           total_score = user_stats.total_score + EXCLUDED.total_score, total_seconds = user_stats.total_seconds + EXCLUDED.total_seconds,
+           questions = user_stats.questions + EXCLUDED.questions, correct = user_stats.correct + EXCLUDED.correct`,
+        [uid, body.category, body.won ? 1 : 0, body.score, body.seconds, body.questions, body.correct],
+      );
       let reward = 0;
       let ratingDelta = 0;
       if (body.mode === 'stage' && body.won) {
-        const prog = db.prepare('SELECT max_stage FROM user_progress WHERE user_id = ?').get(uid) as { max_stage: number };
-        const st = STAGES[body.stage! - 1];
+        const prog = (await q<{ max_stage: number }>('SELECT max_stage FROM user_progress WHERE user_id = $1 FOR UPDATE', [uid])).rows[0];
+        const st = stages[body.stage! - 1];
         if (body.stage! > prog.max_stage) {
           reward = st.reward;
-          db.prepare('UPDATE user_progress SET max_stage = ?, points = points + ? WHERE user_id = ?').run(body.stage, reward, uid);
+          await q('UPDATE user_progress SET max_stage = $1, points = points + $2 WHERE user_id = $3', [body.stage, reward, uid]);
         } else {
           reward = Math.round(st.reward / 4);
-          db.prepare('UPDATE user_progress SET points = points + ? WHERE user_id = ?').run(reward, uid);
+          await q('UPDATE user_progress SET points = points + $1 WHERE user_id = $2', [reward, uid]);
         }
       }
       if (body.mode === 'versus') {
         ratingDelta = body.won ? 25 : -15;
-        db.prepare('UPDATE ratings SET rating = MAX(0, rating + ?), wins = wins + ?, losses = losses + ? WHERE user_id = ?').run(
+        await q('UPDATE ratings SET rating = GREATEST(0, rating + $1), wins = wins + $2, losses = losses + $3 WHERE user_id = $4', [
           ratingDelta,
           body.won ? 1 : 0,
           body.won ? 0 : 1,
           uid,
-        );
+        ]);
       }
-      return { reward, ratingDelta };
-    })();
-    return { ...out, me: getMe(db, uid) };
+      return { reward, ratingDelta, me: await getMe(db, uid, q) };
+    });
+    return out;
   });
 
   app.get('/api/leaderboard', async () => {
-    return db
-      .prepare(
-        `SELECT u.display_name AS displayName, r.rating, r.wins, r.losses FROM ratings r JOIN users u ON u.id = r.user_id
-         WHERE r.wins + r.losses > 0 ORDER BY r.rating DESC, r.wins DESC LIMIT 100`,
-      )
-      .all();
+    const r = await db.query(
+      `SELECT u.display_name AS "displayName", r.rating, r.wins, r.losses FROM ratings r JOIN users u ON u.id = r.user_id
+       WHERE r.wins + r.losses > 0 ORDER BY r.rating DESC, r.wins DESC LIMIT 100`,
+    );
+    return r.rows;
   });
 
   return app;
 }
 
-function toQuestion(r: QuestionRow) {
-  return { id: r.id, category: r.category, text: r.text, options: JSON.parse(r.options) as string[], answerIndex: r.answer_index, explanation: r.explanation ?? undefined };
+/** Randomise option order per delivery so the same question never looks identical twice. */
+function shuffledQuestion(r: QuestionRow) {
+  const options = (typeof r.options === 'string' ? JSON.parse(r.options) : r.options) as string[];
+  const order = options.map((_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  return {
+    id: r.id,
+    category: r.category,
+    text: r.text,
+    options: order.map((i) => options[i]),
+    answerIndex: order.indexOf(r.answer_index),
+    explanation: r.explanation ?? undefined,
+  };
 }
 
-export function getMe(db: DB, uid: number) {
-  const u = db.prepare('SELECT id, username, display_name AS displayName, created_at AS createdAt FROM users WHERE id = ?').get(uid) as
-    | { id: number; username: string; displayName: string; createdAt: string }
-    | undefined;
-  if (!u) throw Object.assign(new Error('unauthorized'), { statusCode: 401 });
-  const prog = db.prepare('SELECT points, unlocked_units, max_stage AS maxStage FROM user_progress WHERE user_id = ?').get(uid) as {
-    points: number;
-    unlocked_units: string;
-    maxStage: number;
-  };
-  const rating = db.prepare('SELECT rating, wins, losses FROM ratings WHERE user_id = ?').get(uid) as { rating: number; wins: number; losses: number };
-  const stats = db
-    .prepare('SELECT category, games, wins, total_score AS totalScore, total_seconds AS totalSeconds, questions, correct FROM user_stats WHERE user_id = ?')
-    .all(uid) as { category: string; games: number; wins: number; totalScore: number; totalSeconds: number; questions: number; correct: number }[];
+export async function getMe(db: DB, uid: number, q: DB['query'] = db.query) {
+  const u = (
+    await q<{ id: number; username: string; displayName: string; createdAt: string }>(
+      'SELECT id, username, display_name AS "displayName", created_at AS "createdAt" FROM users WHERE id = $1',
+      [uid],
+    )
+  ).rows[0];
+  if (!u) throw httpError(401, 'unauthorized');
+  const prog = (
+    await q<{ points: number; unlocked_units: string[]; maxStage: number }>('SELECT points, unlocked_units, max_stage AS "maxStage" FROM user_progress WHERE user_id = $1', [
+      uid,
+    ])
+  ).rows[0];
+  const rating = (await q<{ rating: number; wins: number; losses: number }>('SELECT rating, wins, losses FROM ratings WHERE user_id = $1', [uid])).rows[0];
+  const stats = (
+    await q<{ category: string; games: number; wins: number; totalScore: number; totalSeconds: number; questions: number; correct: number }>(
+      'SELECT category, games, wins, total_score AS "totalScore", total_seconds AS "totalSeconds", questions, correct FROM user_stats WHERE user_id = $1',
+      [uid],
+    )
+  ).rows;
   return {
     ...u,
     points: prog.points,
-    unlockedUnits: JSON.parse(prog.unlocked_units) as string[],
+    unlockedUnits: prog.unlocked_units,
     maxStage: prog.maxStage,
     rating,
-    stats: stats.map((s) => ({ ...s, scorePerSec: s.totalSeconds > 0 ? s.totalScore / s.totalSeconds : 0 })),
+    stats: stats.map((s) => ({ ...s, totalScore: Number(s.totalScore), totalSeconds: Number(s.totalSeconds), scorePerSec: Number(s.totalSeconds) > 0 ? Number(s.totalScore) / Number(s.totalSeconds) : 0 })),
   };
 }

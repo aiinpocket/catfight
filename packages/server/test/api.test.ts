@@ -1,8 +1,9 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
-import { insertQuestions, openDb } from '../src/db.js';
+import { importBank, openPglite, type DB } from '../src/db.js';
 
+let db: DB;
 let app: FastifyInstance;
 let tokenA = '';
 let tokenB = '';
@@ -10,19 +11,20 @@ let tokenB = '';
 const H = (t: string) => ({ authorization: `Bearer ${t}` });
 
 beforeAll(async () => {
-  const db = openDb(':memory:');
-  insertQuestions(
-    db,
-    Array.from({ length: 12 }, (_, i) => ({
-      category: 'finance_basics',
-      text: `題目 ${i}`,
-      options: ['A', 'B', 'C', 'D'],
-      answerIndex: i % 4,
-    })),
-  );
-  insertQuestions(db, [{ category: 'bank_law', text: '法規題', options: ['甲', '乙', '丙', '丁'], answerIndex: 1 }]);
+  db = await openPglite();
+  await importBank(db, {
+    category: { id: 'finance_basics', name: '金融常識', sortOrder: 1 },
+    questions: Array.from({ length: 12 }, (_, i) => ({ text: `題目 ${i}`, options: ['甲', '乙', '丙', '丁'], answerIndex: i % 4 })),
+  });
+  await importBank(db, { category: { id: 'security', name: '安控', sortOrder: 2 }, questions: [{ text: '安控題', options: ['A', 'B', 'C', 'D'], answerIndex: 1 }] });
+  await importBank(db, { category: { id: 'empty_cat', name: '空的', sortOrder: 3 }, questions: [] });
   app = buildApp({ db, jwtSecret: 'test-secret' });
   await app.ready();
+}, 60_000);
+
+afterAll(async () => {
+  await app.close();
+  await db.close();
 });
 
 describe('auth', () => {
@@ -33,16 +35,10 @@ describe('auth', () => {
     expect(r.json().me.unlockedUnits).toEqual(['tank', 'archer']);
     expect(r.json().me.username).toBe('alice_1');
 
-    const dup = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'alice_1', displayName: 'x', password: 'password1' } });
-    expect(dup.statusCode).toBe(409);
-
-    const bad = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'a', displayName: 'x', password: 'short' } });
-    expect(bad.statusCode).toBe(400);
-
-    const login = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'ALICE_1', password: 'password1' } });
-    expect(login.statusCode).toBe(200);
-    const wrong = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'alice_1', password: 'nope-nope' } });
-    expect(wrong.statusCode).toBe(401);
+    expect((await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'alice_1', displayName: 'x', password: 'password1' } })).statusCode).toBe(409);
+    expect((await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'a', displayName: 'x', password: 'short' } })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'ALICE_1', password: 'password1' } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: 'alice_1', password: 'nope-nope' } })).statusCode).toBe(401);
 
     const b = await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'bob', displayName: '鮑伯', password: 'password2' } });
     tokenB = b.json().token;
@@ -52,38 +48,66 @@ describe('auth', () => {
     const me = await app.inject({ method: 'GET', url: '/api/me', headers: H(tokenA) });
     expect(me.statusCode).toBe(200);
     expect(JSON.stringify(me.json())).not.toContain('$2');
-    const anon = await app.inject({ method: 'GET', url: '/api/me' });
-    expect(anon.statusCode).toBe(401);
+    expect((await app.inject({ method: 'GET', url: '/api/me' })).statusCode).toBe(401);
   });
 });
 
-describe('questions', () => {
-  it('returns random questions of a category, honours exclude, tops up small banks', async () => {
-    const r = await app.inject({ method: 'GET', url: '/api/questions?category=finance_basics&limit=5', headers: H(tokenA) });
+describe('categories, questions and stages', () => {
+  it('lists categories with counts in sort order', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/categories' });
+    expect(r.json()).toEqual([
+      { id: 'finance_basics', name: '金融常識', count: 12 },
+      { id: 'security', name: '安控', count: 1 },
+      { id: 'empty_cat', name: '空的', count: 0 },
+    ]);
+  });
+
+  it('re-importing the same bank adds nothing', async () => {
+    const n = await importBank(db, { category: { id: 'security', name: '安控', sortOrder: 2 }, questions: [{ text: '安控題', options: ['A', 'B', 'C', 'D'], answerIndex: 1 }] });
+    expect(n).toBe(0);
+  });
+
+  it('returns random questions with shuffled options and a consistent answer index', async () => {
+    const r = await app.inject({ method: 'GET', url: '/api/questions?category=finance_basics&limit=12', headers: H(tokenA) });
     expect(r.statusCode).toBe(200);
-    const qs = r.json() as { id: number; options: string[] }[];
-    expect(qs).toHaveLength(5);
-    expect(qs[0].options).toHaveLength(4);
+    const qs = r.json() as { id: number; text: string; options: string[]; answerIndex: number }[];
+    expect(qs).toHaveLength(12);
+    for (const q of qs) {
+      const i = Number(q.text.replace('題目 ', ''));
+      expect(q.options[q.answerIndex]).toBe(['甲', '乙', '丙', '丁'][i % 4]);
+      expect(new Set(q.options)).toEqual(new Set(['甲', '乙', '丙', '丁']));
+    }
+    // over many deliveries the option order must vary
+    const orders = new Set<string>();
+    for (let k = 0; k < 15; k++) {
+      const one = (await app.inject({ method: 'GET', url: '/api/questions?category=security&limit=1', headers: H(tokenA) })).json()[0];
+      orders.add(one.options.join(''));
+    }
+    expect(orders.size).toBeGreaterThan(1);
+  });
 
-    const ex = qs.map((q) => q.id).join(',');
-    const r2 = await app.inject({ method: 'GET', url: `/api/questions?category=finance_basics&limit=5&exclude=${ex}`, headers: H(tokenA) });
-    const ids2 = (r2.json() as { id: number }[]).map((q) => q.id);
-    expect(ids2.some((id) => qs.some((q) => q.id === id))).toBe(false);
+  it('honours exclude, tops up small banks, rejects unknown categories', async () => {
+    const first = (await app.inject({ method: 'GET', url: '/api/questions?category=finance_basics&limit=5', headers: H(tokenA) })).json() as { id: number }[];
+    const ex = first.map((q) => q.id).join(',');
+    const second = (await app.inject({ method: 'GET', url: `/api/questions?category=finance_basics&limit=5&exclude=${ex}`, headers: H(tokenA) })).json() as { id: number }[];
+    expect(second.some((q) => first.some((f) => f.id === q.id))).toBe(false);
+    expect((await app.inject({ method: 'GET', url: '/api/questions?category=security&limit=50', headers: H(tokenA) })).json()).toHaveLength(1);
+    expect((await app.inject({ method: 'GET', url: '/api/questions?category=nope', headers: H(tokenA) })).statusCode).toBe(400);
+    expect((await app.inject({ method: 'GET', url: '/api/questions?category=empty_cat', headers: H(tokenA) })).json()).toEqual([]);
+  });
 
-    const r3 = await app.inject({ method: 'GET', url: '/api/questions?category=bank_law&limit=50', headers: H(tokenA) });
-    expect(r3.json()).toHaveLength(1);
-
-    const badCat = await app.inject({ method: 'GET', url: '/api/questions?category=nope', headers: H(tokenA) });
-    expect(badCat.statusCode).toBe(400);
+  it('builds stages by cycling categories that have questions', async () => {
+    const st = (await app.inject({ method: 'GET', url: '/api/stages', headers: H(tokenA) })).json() as { id: number; category: string; unlocked: boolean; ai: { scorePerSec: number } }[];
+    expect(st.length).toBe(2 * 5);
+    expect(st.map((s) => s.category).slice(0, 4)).toEqual(['finance_basics', 'security', 'finance_basics', 'security']);
+    expect(st[2].ai.scorePerSec).toBeGreaterThan(st[0].ai.scorePerSec);
+    expect(st[0].unlocked).toBe(true);
+    expect(st[1].unlocked).toBe(false);
   });
 });
 
 describe('stage mode', () => {
   it('grants reward on first clear, unlocks next stage, smaller reward on replay', async () => {
-    const st0 = await app.inject({ method: 'GET', url: '/api/stages', headers: H(tokenA) });
-    expect(st0.json()[0].unlocked).toBe(true);
-    expect(st0.json()[1].unlocked).toBe(false);
-
     const payload = { mode: 'stage', category: 'finance_basics', stage: 1, won: true, score: 200, seconds: 120, questions: 30, correct: 20 };
     const r = await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenA), payload });
     expect(r.statusCode).toBe(200);
@@ -91,42 +115,37 @@ describe('stage mode', () => {
     expect(r.json().me.points).toBe(60);
     expect(r.json().me.maxStage).toBe(1);
 
-    const st1 = await app.inject({ method: 'GET', url: '/api/stages', headers: H(tokenA) });
-    expect(st1.json()[1].unlocked).toBe(true);
+    const st = (await app.inject({ method: 'GET', url: '/api/stages', headers: H(tokenA) })).json();
+    expect(st[1].unlocked).toBe(true);
 
-    const again = await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenA), payload });
-    expect(again.json().reward).toBe(15);
-
-    const lost = await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenA), payload: { ...payload, won: false } });
-    expect(lost.json().reward).toBe(0);
+    expect((await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenA), payload })).json().reward).toBe(15);
+    expect((await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenA), payload: { ...payload, won: false } })).json().reward).toBe(0);
+    // stage 2 is 'security', reporting it as finance_basics is rejected
+    expect((await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenA), payload: { ...payload, stage: 2 } })).statusCode).toBe(400);
   });
 
   it('unlocks units with points and refuses when short', async () => {
-    const no = await app.inject({ method: 'POST', url: '/api/unlock', headers: H(tokenA), payload: { unitId: 'medic' } });
-    expect(no.statusCode).toBe(400);
-    // 75 points so far, mage costs 100: clear stage 2
-    await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenA), payload: { mode: 'stage', category: 'bank_law', stage: 2, won: true, score: 100, seconds: 100, questions: 20, correct: 12 } });
+    expect((await app.inject({ method: 'POST', url: '/api/unlock', headers: H(tokenA), payload: { unitId: 'medic' } })).statusCode).toBe(400);
+    // 75 points so far; clear stage 2 (+70) -> 145, mage costs 100
+    await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenA), payload: { mode: 'stage', category: 'security', stage: 2, won: true, score: 100, seconds: 100, questions: 20, correct: 12 } });
     const ok = await app.inject({ method: 'POST', url: '/api/unlock', headers: H(tokenA), payload: { unitId: 'mage' } });
     expect(ok.statusCode).toBe(200);
     expect(ok.json().unlockedUnits).toContain('mage');
     expect(ok.json().points).toBe(45);
-    const twice = await app.inject({ method: 'POST', url: '/api/unlock', headers: H(tokenA), payload: { unitId: 'mage' } });
-    expect(twice.json().points).toBe(45);
+    expect((await app.inject({ method: 'POST', url: '/api/unlock', headers: H(tokenA), payload: { unitId: 'mage' } })).json().points).toBe(45);
   });
 });
 
 describe('versus mode', () => {
   it('falls back to a bot when nobody else has played the category', async () => {
-    const r = await app.inject({ method: 'POST', url: '/api/match/opponent', headers: H(tokenB), payload: { category: 'trust' } });
+    const r = await app.inject({ method: 'POST', url: '/api/match/opponent', headers: H(tokenB), payload: { category: 'empty_cat' } });
     expect(r.json().opponentId).toBeNull();
     expect(r.json().scorePerSec).toBeCloseTo(1.75);
   });
 
   it('matches against another player using their score-per-second in that category', async () => {
     const r = await app.inject({ method: 'POST', url: '/api/match/opponent', headers: H(tokenB), payload: { category: 'finance_basics' } });
-    expect(r.json().opponentId).not.toBeNull();
     expect(r.json().displayName).toBe('愛麗絲');
-    // alice: 3 results in finance_basics, 200+200+200 score over 360 s
     expect(r.json().scorePerSec).toBeCloseTo(600 / 360);
   });
 
@@ -136,10 +155,8 @@ describe('versus mode', () => {
     expect(win.json().me.rating.rating).toBe(1025);
     const lose = await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenB), payload: { mode: 'versus', category: 'finance_basics', opponentId: 1, won: false, score: 50, seconds: 90, questions: 25, correct: 5 } });
     expect(lose.json().me.rating.rating).toBe(1010);
-
     const lb = await app.inject({ method: 'GET', url: '/api/leaderboard' });
-    expect(lb.json()[0]).toMatchObject({ displayName: '鮑伯', rating: 1010, wins: 1, losses: 1 });
-    expect(lb.json()).toHaveLength(1);
+    expect(lb.json()).toEqual([{ displayName: '鮑伯', rating: 1010, wins: 1, losses: 1 }]);
   });
 
   it('rejects impossible stats', async () => {

@@ -14,7 +14,7 @@ function nav(screen: string) {
     case 'stages':
       return void stagesScreen(ctx).catch(fail);
     case 'versus':
-      return versusScreen(ctx);
+      return void versusScreen(ctx).catch(fail);
     case 'shop':
       return shopScreen(ctx);
     case 'leaderboard':

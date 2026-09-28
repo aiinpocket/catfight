@@ -6,7 +6,7 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["tsx", "packages/server/src/main.ts"],
       "port": 8080,
-      "env": { "JWT_SECRET": "dev-secret-change-me", "DATA_DIR": "volumes/data", "WEB_DIR": "packages/web/dist", "QUESTIONS_DIR": "data/questions", "PORT": "8080" }
+      "env": { "JWT_SECRET": "dev-secret-change-me", "DATABASE_URL": "pglite://volumes/pglite", "WEB_DIR": "packages/web/dist", "QUESTIONS_DIR": "data/questions", "PORT": "8080" }
     }
   ]
 }

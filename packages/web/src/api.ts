@@ -1,4 +1,4 @@
-import type { UnitDef } from '@catfight/engine';
+import type { AiConfig, UnitDef } from '@catfight/engine';
 
 export interface Me {
   id: number;
@@ -25,8 +25,15 @@ export interface StageInfo {
   name: string;
   category: string;
   reward: number;
+  ai: AiConfig;
   unlocked: boolean;
   cleared: boolean;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  count: number;
 }
 
 export interface Opponent {
@@ -93,6 +100,7 @@ export const api = {
   me: () => call<Me>('GET', '/api/me'),
   units: () => call<UnitDef[]>('GET', '/api/units'),
   stages: () => call<StageInfo[]>('GET', '/api/stages'),
+  categories: () => call<Category[]>('GET', '/api/categories'),
   questions: (category: string, limit = 50, exclude: number[] = []) =>
     call<Question[]>('GET', `/api/questions?category=${encodeURIComponent(category)}&limit=${limit}${exclude.length ? `&exclude=${exclude.join(',')}` : ''}`),
   unlock: (unitId: string) => call<Me>('POST', '/api/unlock', { unitId }),

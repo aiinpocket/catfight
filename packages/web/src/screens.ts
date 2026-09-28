@@ -1,5 +1,5 @@
-import { CATEGORIES, DEFAULT_STRATEGY, STAGES, UNITS } from '@catfight/engine';
-import { api, setToken, type Me } from './api';
+import { DEFAULT_STRATEGY, UNITS } from '@catfight/engine';
+import { api, setToken, type Category, type Me, type StageInfo } from './api';
 import { runBattle } from './game/battle';
 import { escapeHtml } from './game/quiz';
 
@@ -11,7 +11,6 @@ export interface Ctx {
   nav: Nav;
 }
 
-const catName = (id: string) => CATEGORIES.find((c) => c.id === id)?.name ?? id;
 
 function screen(root: HTMLElement, html: string): HTMLElement {
   root.innerHTML = '';
@@ -70,7 +69,7 @@ export function menuScreen(ctx: Ctx) {
   const s = screen(
     ctx.root,
     `<h1>金融貓咪大作戰</h1>
-    <div class="card row"><div class="grow"><b>${escapeHtml(me.displayName)}</b><div class="sub" style="text-align:left">積分 ${me.rating.rating} ・ 點數 ${me.points} ・ 關卡進度 ${me.maxStage}/${STAGES.length}</div></div>
+    <div class="card row"><div class="grow"><b>${escapeHtml(me.displayName)}</b><div class="sub" style="text-align:left">積分 ${me.rating.rating} ・ 點數 ${me.points} ・ 已通關 ${me.maxStage} 關</div></div>
       <button class="ghost" id="logout">登出</button></div>
     <button class="list-btn card" id="stage"><img src="/assets/tank.png" alt=""><div><div class="title">關卡模式</div><div class="meta">逐關推進，賺點數解鎖新貓咪</div></div></button>
     <button class="list-btn card" id="versus"><img src="/assets/runner.png" alt=""><div><div class="title">對戰模式</div><div class="meta">選題型配對其他玩家，爭排行榜積分</div></div></button>
@@ -94,27 +93,30 @@ export async function stagesScreen(ctx: Ctx) {
   const stages = await api.stages();
   const list = s.querySelector('#list')!;
   list.innerHTML = '';
+  if (!stages.length) {
+    list.innerHTML = '<p class="sub">題庫還是空的，請先匯入題目。</p>';
+    return;
+  }
   for (const st of stages) {
     const b = document.createElement('button');
     b.className = 'list-btn card';
     b.disabled = !st.unlocked;
-    b.innerHTML = `<div class="pill">${st.id}</div><div class="grow"><div class="title">${escapeHtml(st.name)} ${st.cleared ? '✅' : ''}</div><div class="meta">${catName(st.category)} ・ 首次通關 +${st.reward} 點</div></div>`;
-    b.addEventListener('click', () => startStage(ctx, st.id));
+    b.innerHTML = `<div class="pill">${st.id}</div><div class="grow"><div class="title">${escapeHtml(st.name)} ${st.cleared ? '✅' : ''}</div><div class="meta">首次通關 +${st.reward} 點 ・ 對手強度 ${st.ai.scorePerSec.toFixed(1)}</div></div>`;
+    b.addEventListener('click', () => startStage(ctx, st));
     list.appendChild(b);
   }
 }
 
-async function startStage(ctx: Ctx, id: number) {
-  const st = STAGES[id - 1];
+async function startStage(ctx: Ctx, st: StageInfo) {
   for (;;) {
-    const r = await runBattle(ctx.root, { mode: 'stage', category: st.category, stage: id, opponentName: `第 ${id} 關 ${st.name}`, ai: st.ai, me: ctx.me! });
+    const r = await runBattle(ctx.root, { mode: 'stage', category: st.category, stage: st.id, opponentName: `第 ${st.id} 關 ${st.name}`, ai: st.ai, me: ctx.me! });
     if (r.outcome) ctx.me = r.outcome.me;
     if (!r.retry) break;
   }
   ctx.nav('stages');
 }
 
-export function versusScreen(ctx: Ctx) {
+export async function versusScreen(ctx: Ctx) {
   const s = screen(
     ctx.root,
     `<div class="row"><button class="ghost" id="back">← 返回</button><h2 class="grow">對戰模式</h2></div>
@@ -123,11 +125,13 @@ export function versusScreen(ctx: Ctx) {
   );
   s.querySelector('#back')!.addEventListener('click', () => ctx.nav('menu'));
   const list = s.querySelector('#list')!;
-  for (const c of CATEGORIES) {
+  const cats: Category[] = (await api.categories()).filter((c) => c.count > 0);
+  if (!cats.length) list.innerHTML = '<p class="sub">題庫還是空的，請先匯入題目。</p>';
+  for (const c of cats) {
     const st = ctx.me!.stats.find((x) => x.category === c.id);
     const b = document.createElement('button');
     b.className = 'list-btn card';
-    b.innerHTML = `<div class="grow"><div class="title">${c.name}</div><div class="meta">${st ? `你的紀錄：${st.games} 場，每秒 ${st.scorePerSec.toFixed(2)} 分` : '尚無紀錄'}</div></div>`;
+    b.innerHTML = `<div class="grow"><div class="title">${escapeHtml(c.name)}</div><div class="meta">${c.count} 題 ・ ${st ? `你的紀錄：${st.games} 場，每秒 ${st.scorePerSec.toFixed(2)} 分` : '尚無紀錄'}</div></div>`;
     b.addEventListener('click', async () => {
       const err = s.querySelector('#err') as HTMLElement;
       try {

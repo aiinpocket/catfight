@@ -124,3 +124,12 @@ ComfyUI（z_image_turbo）生成單位精靈（透明背景、側面、卡通風
 - engine：vitest 單元測試（移動、攻擊、光環、勝負判定、確定性）、平衡模擬測試。
 - server：vitest + 內存 SQLite 的 API 測試（註冊登入、題目、配對、結果回報、排行）。
 - web：Playwright 煙霧測試（登入 → 開一關 → 答一題 → 召喚一隻）。
+
+
+## 7. 2026-09-28 變更：PostgreSQL、動態關卡、空題庫
+
+- 資料庫改為 **PostgreSQL**（`pg`）；測試與本機開發用內嵌 PGlite（`DATABASE_URL=pglite://dir`）。SQLite 移除。
+- 題庫從空開始，`data/questions/*.json` 不進 git；檔案格式改為 `{ category: {id, name, sortOrder}, questions: [...] }`，啟動時自動匯入（分類＋題目文字去重）。
+- **關卡動態化**：`buildStages(categories)`，第 n 關分類 = categories[(n−1) mod 分類數]，每分類 5 輪；AI `scorePerSec = min(3.5, 0.5 + 0.18·(n−1))`、warmup 遞減、策略每 2 關升級。模擬：第 1 關弱玩家 95% 勝，第 15 關平均玩家 29% 勝。
+- 題目每次隨機抽取，且**選項順序由後端每次洗牌**後回傳（answerIndex 同步調整）。
+- 對戰模式分類清單來自 `/api/categories`（只列有題目的分類）。
