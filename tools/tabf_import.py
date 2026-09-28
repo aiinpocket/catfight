@@ -10,6 +10,9 @@ usage:
   python tools/tabf_import.py --dir <pdf dir> --ids 663415,644264,617843 \
       --category family_trust --name 家族信託規劃顧問 --sort 1 --out data/questions/family_trust.json
   python tools/tabf_import.py --dir <pdf dir> --ids 663416,644266,617844 --layout single2col       --category fintech --name 金融科技力 --sort 2 --out data/questions/fintech.json
+  python tools/tabf_import.py --dir data/pdf/esg --ids 666084,647398,644267 --layout single2col --count 80       --category esg --name 永續發展基礎能力 --sort 3 --out data/questions/esg.json
+
+--count is the number of questions per session (60 for most TABF exams, 80 for 永續發展基礎能力).
 
 Multiple-answer items (e.g. "2、3、4") and items whose text could not be parsed into exactly
 four options are skipped and reported, so nothing malformed reaches the game.
@@ -24,7 +27,8 @@ import pdfplumber
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-Q_RE = re.compile(r"^(\d{1,2})\.\s*(.*)$")
+# "55「. 題目」" — an opening quote sometimes lands between the number and the dot; keep the quote with the text
+Q_RE = re.compile(r"^(\d{1,2})(「?)\.\s*(.*)$")
 OPT_RE = re.compile(r"^\((\d)\)\s*(.*)$")
 NOISE_RE = re.compile(
     r"^(第\s*[\d一二三四]+\s*部分|注意：|本試卷|鉛筆在|答案卡|選作答|\d+\s*$|台灣金融研訓院|節次：|第\s*\d+\s*期.*測驗試題$)"
@@ -60,7 +64,7 @@ def parse_questions(pdf_path, columns=1):
         if m and (cur is None and int(m.group(1)) == 1 or cur is not None and int(m.group(1)) == cur + 1):
             cur = int(m.group(1))
             cur_opt = None
-            qs[cur] = {"text": m.group(2).strip(), "options": {}}
+            qs[cur] = {"text": (m.group(2) + m.group(3)).strip(), "options": {}}
             continue
         if cur is None:
             continue
@@ -86,7 +90,7 @@ def parse_questions(pdf_path, columns=1):
     return qs
 
 
-def parse_answers(pdf_path):
+def parse_answers(pdf_path, count=60):
     """Return {session(1|2): {num: answer_or_None}}; None for multi-answer / 送分 items."""
     out = {1: {}, 2: {}}
     with pdfplumber.open(pdf_path) as pdf:
@@ -96,14 +100,14 @@ def parse_answers(pdf_path):
         if not m:
             continue
         n = int(m.group(1))
-        if not 1 <= n <= 60:
+        if not 1 <= n <= count:
             continue
         for s, tok in ((1, m.group(2)), (2, m.group(3))):
             out[s][n] = int(tok) if re.fullmatch(r"[1-4]", tok) else None
     return out
 
 
-def parse_answers_single(pdf_path):
+def parse_answers_single(pdf_path, count=60):
     """One-column key "N A" -> {num: answer_or_None}."""
     out = {}
     with pdfplumber.open(pdf_path) as pdf:
@@ -113,7 +117,7 @@ def parse_answers_single(pdf_path):
         if not m:
             continue
         n = int(m.group(1))
-        if 1 <= n <= 60:
+        if 1 <= n <= count:
             out[n] = int(m.group(2)) if re.fullmatch(r"[1-4]", m.group(2)) else None
     return out
 
@@ -137,19 +141,20 @@ def main():
     ap.add_argument("--sort", type=int, default=0)
     ap.add_argument("--out", required=True)
     ap.add_argument("--layout", choices=["two-session", "single2col"], default="two-session")
+    ap.add_argument("--count", type=int, default=60, help="questions per session (60, or 80 for 永續發展基礎能力)")
     a = ap.parse_args()
 
     questions = []
     skipped = []
     for exam in a.ids.split(","):
         if a.layout == "single2col":
-            answers = {1: parse_answers_single(os.path.join(a.dir, f"{exam}-2.pdf"))}
+            answers = {1: parse_answers_single(os.path.join(a.dir, f"{exam}-2.pdf"), a.count)}
             sessions = [(1, parse_questions(os.path.join(a.dir, f"{exam}-1.pdf"), columns=2))]
         else:
-            answers = parse_answers(os.path.join(a.dir, f"{exam}-3.pdf"))
+            answers = parse_answers(os.path.join(a.dir, f"{exam}-3.pdf"), a.count)
             sessions = [(s, parse_questions(os.path.join(a.dir, f"{exam}-{s}.pdf"))) for s in (1, 2)]
         for session, qs in sessions:
-            for n in range(1, 61):
+            for n in range(1, a.count + 1):
                 q = qs.get(n)
                 ans = answers[session].get(n)
                 tag = f"{exam}-{session}#{n}"
