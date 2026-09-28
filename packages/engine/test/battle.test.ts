@@ -7,6 +7,7 @@ import {
   FIELD_LENGTH,
   runUntilEnd,
   spawn,
+  STAGE_START_SCORE,
   step,
   TOWER_HP,
   UNITS,
@@ -149,5 +150,15 @@ describe('determinism', () => {
     const tick = s.tick;
     step(s);
     expect(s.tick).toBe(tick);
+  });
+});
+
+describe('stage starting score', () => {
+  it('createBattle seeds the given score so a stage player can field one cat at once', () => {
+    const s = createBattle({}, { left: STAGE_START_SCORE });
+    expect(s.score.left).toBe(50);
+    expect(s.score.right).toBe(0);
+    expect(spawn(s, 'left', 'archer')).not.toBeNull();
+    expect(createBattle().score.left).toBe(0);
   });
 });

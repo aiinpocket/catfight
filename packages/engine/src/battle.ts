@@ -3,7 +3,9 @@ import { effectiveStats, type Upgrades } from './upgrades.js';
 import { unitDef } from './bosses.js';
 
 export const FIELD_LENGTH = 1000;
-export const BALANCE = { towerHp: 800, overtimeMs: 150_000, overtimeBleed: 10 };
+export const BALANCE = { towerHp: 800, overtimeMs: 150_000, overtimeBleed: 10, stageStartScore: 50 };
+/** score the player starts a stage with, enough to field one cat before the first question is read */
+export const STAGE_START_SCORE = BALANCE.stageStartScore;
 export const TOWER_HP = BALANCE.towerHp;
 export const TICK_MS = 50;
 export const SCORE_PER_CORRECT = 10;
@@ -64,16 +66,19 @@ export interface BattleState {
   upgrades: Record<Side, Upgrades>;
   /** time (ms) until which a dead scholar's aura still applies, per side */
   scholarLingerUntil: Record<Side, number>;
+  /** hp/dps multiplier for a side's regular cats (paid spawns, boss summons and splits alike); bosses are never scaled */
+  unitMul: Record<Side, { hp: number; dps: number }>;
 }
 
-export function createBattle(upgrades: Partial<Record<Side, Upgrades>> = {}): BattleState {
+export function createBattle(upgrades: Partial<Record<Side, Upgrades>> = {}, startScore: Partial<Record<Side, number>> = {}): BattleState {
   return {
     upgrades: { left: upgrades.left ?? {}, right: upgrades.right ?? {} },
     scholarLingerUntil: { left: 0, right: 0 },
+    unitMul: { left: { hp: 1, dps: 1 }, right: { hp: 1, dps: 1 } },
     tick: 0,
     timeMs: 0,
     towerHp: { left: BALANCE.towerHp, right: BALANCE.towerHp },
-    score: { left: 0, right: 0 },
+    score: { left: startScore.left ?? 0, right: startScore.right ?? 0 },
     entities: [],
     nextId: 1,
     winner: null,
@@ -129,17 +134,19 @@ export function canSpawn(state: BattleState, side: Side, unitId: string): boolea
 
 function makeEntity(state: BattleState, side: Side, def: UnitDef, x: number): Entity {
   const st = effectiveStats(def, state.upgrades[side]);
+  const m = def.boss ? { hp: 1, dps: 1 } : state.unitMul[side];
+  const hp = Math.max(1, Math.round(st.hp * m.hp));
   const e: Entity = {
     id: state.nextId++,
     side,
     unitId: def.id,
     x,
-    hp: st.hp,
-    maxHp: st.hp,
+    hp,
+    maxHp: hp,
     attacking: false,
     cooldown: 0,
     hit: false,
-    dps: st.dps,
+    dps: st.dps * m.dps,
     range: st.range,
     hpBonusFrac: st.hpBonusFrac,
     targetId: null,
@@ -336,7 +343,11 @@ export function step(state: BattleState, dtMs = TICK_MS): void {
       }
       state.events.push({ type: 'death', entityId: e.id, side: e.side, unitId: e.unitId });
       if (boss?.kind === 'split') {
-        for (let k = 0; k < boss.count; k++) spawnFree(state, e.side, boss.unitId, e.x);
+        // fragments share one cat's worth of hp between them
+        for (let k = 0; k < boss.count; k++) {
+          const f = spawnFree(state, e.side, boss.unitId, e.x);
+          if (f) f.hp = f.maxHp = Math.max(1, Math.round(f.maxHp / boss.count));
+        }
       }
     }
   }

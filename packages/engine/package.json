@@ -8,7 +8,8 @@
   "scripts": {
     "test": "vitest run",
     "build": "tsc -p tsconfig.json --noEmit",
-    "balance": "tsx scripts/balance.ts"
+    "balance": "tsx scripts/balance.ts",
+    "calibrate": "tsx scripts/calibrate.ts"
   },
   "devDependencies": {
     "tsx": "^4.19.0",

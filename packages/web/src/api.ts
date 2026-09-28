@@ -28,6 +28,7 @@ export interface StageInfo {
   reward: number;
   ai: AiConfig;
   boss: { unitId: string; name: string; desc: string; hp: number; dps: number; range: number };
+  targetAccuracy: number;
   powerTier: number;
   unlocked: boolean;
   cleared: boolean;

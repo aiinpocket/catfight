@@ -1,4 +1,6 @@
 import { UNITS, type UnitDef } from './units.js';
+import { lateT, scheduleT } from './schedule.js';
+import { BOSS_CALIBRATION } from './bossCalibration.js';
 
 /** Boss special abilities. Numbers are tuned per stage in bossDef(). */
 export type BossAbility =
@@ -229,7 +231,7 @@ export function abilityText(a: BossAbility): string {
     case 'execute':
       return `命中血量低於 ${Math.round(a.below * 100)}% 的目標時直接擊殺`;
     case 'split':
-      return `死亡時在原地分裂出 ${a.count} 隻${UNITS[a.unitId]?.name ?? a.unitId}`;
+      return `死亡時在原地分裂出 ${a.count} 隻${UNITS[a.unitId]?.name ?? a.unitId}（血量平分）`;
     case 'healAllies':
       return `每秒治療所有友軍 ${a.perSec} 血`;
     case 'pierce':
@@ -239,25 +241,27 @@ export function abilityText(a: BossAbility): string {
   }
 }
 
-/** global boss stat multipliers (balance knobs) */
-export const BOSS_TUNE = { hpMul: 0.8, dpsMul: 0.9 };
-const bossCache = new Map<number, UnitDef>();
-let cacheKey = '';
+/**
+ * Boss stat curve: grows along the accuracy schedule (hp0 -> hp0+hp1 by the time the bar is maxed),
+ * then keeps growing by lateGain across the remaining stages, in step with the player's upgrades.
+ */
+export const BOSS_TUNE = { hpMul: 0.8, dpsMul: 0.9, hp0: 420, hp1: 800, dps0: 12, dps1: 30, lateGain: 0.6 };
+/** per-stage hp/dps multiplier from scripts/calibrate.ts (1 = uncalibrated); mutable so the calibration script can search */
+export const bossScale: Record<number, number> = { ...BOSS_CALIBRATION };
+const bossCache = new Map<number, { key: string; def: UnitDef }>();
 
 /** Full unit definition for the boss of stage n (1..100). */
 export function bossDef(n: number): UnitDef {
-  const key = `${BOSS_TUNE.hpMul}/${BOSS_TUNE.dpsMul}`;
-  if (key !== cacheKey) {
-    bossCache.clear();
-    cacheKey = key;
-  }
+  const scale = bossScale[n] ?? 1;
+  const key = `${JSON.stringify(BOSS_TUNE)}/${scale}`;
   const cached = bossCache.get(n);
-  if (cached) return cached;
+  if (cached && cached.key === key) return cached.def;
   const entry = BOSS_LIST[(n - 1) % BOSS_COUNT];
   const p = PROFILE[entry.profile];
-  const t = (n - 1) / 99;
-  const baseHp = 420 + 2600 * t * t + 540 * t; // 420 -> ~3560
-  const baseDps = 12 + 70 * t; // 12 -> 82
+  const s = scheduleT(n);
+  const late = 1 + BOSS_TUNE.lateGain * lateT(n, BOSS_COUNT);
+  const baseHp = (BOSS_TUNE.hp0 + BOSS_TUNE.hp1 * s) * late * scale;
+  const baseDps = (BOSS_TUNE.dps0 + BOSS_TUNE.dps1 * s) * late * scale;
   const ability = bossAbility(entry.ability, n);
   const def: UnitDef = {
     id: bossId(n),
@@ -273,7 +277,7 @@ export function bossDef(n: number): UnitDef {
     attackInterval: p.interval,
     boss: ability,
   };
-  bossCache.set(n, def);
+  bossCache.set(n, { key, def });
   return def;
 }
 

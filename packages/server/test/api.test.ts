@@ -191,32 +191,36 @@ describe('stage mode', () => {
     expect((await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenC), payload: { ...payload, stage: 2, category: 'security' } })).json().reward).toBe(18);
 
     expect((await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenA), payload })).json().reward).toBe(15);
-    expect((await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenA), payload: { ...payload, won: false } })).json().reward).toBe(0);
+    // a loss pays half of what the win would have (floored): 15/2 -> 7 on a cleared stage, 90/2 -> 45 on an uncleared one, and never clears it
+    expect((await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenA), payload: { ...payload, won: false } })).json().reward).toBe(7);
+    const lost4 = (await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenC), payload: { ...payload, stage: 4, category: 'security', won: false } })).json();
+    expect(lost4.reward).toBe(45);
+    expect(lost4.me.clearedCount).toBe(1);
     // stage 2 is 'security', reporting it as finance_basics is rejected
     expect((await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenA), payload: { ...payload, stage: 2 } })).statusCode).toBe(400);
   });
 
   it('unlocks units with points and refuses when short', async () => {
     expect((await app.inject({ method: 'POST', url: '/api/unlock', headers: H(tokenA), payload: { unitId: 'medic' } })).statusCode).toBe(400);
-    // 75 points so far; clear stage 2 (+70) -> 145, mage costs 100
+    // 82 points so far (60 + 15 + 7 loss consolation); clear stage 2 (+70) -> 152, mage costs 100
     await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenA), payload: { mode: 'stage', category: 'security', stage: 2, won: true, score: 100, seconds: 100, questions: 20, correct: 12 } });
     const ok = await app.inject({ method: 'POST', url: '/api/unlock', headers: H(tokenA), payload: { unitId: 'mage' } });
     expect(ok.statusCode).toBe(200);
     expect(ok.json().unlockedUnits).toContain('mage');
-    expect(ok.json().points).toBe(45);
-    expect((await app.inject({ method: 'POST', url: '/api/unlock', headers: H(tokenA), payload: { unitId: 'mage' } })).json().points).toBe(45);
+    expect(ok.json().points).toBe(52);
+    expect((await app.inject({ method: 'POST', url: '/api/unlock', headers: H(tokenA), payload: { unitId: 'mage' } })).json().points).toBe(52);
   });
 });
 
 describe('upgrades', () => {
   it('buys levels with points, enforces unlock, cost and max level', async () => {
-    // alice has 45 points; tank hp level 1 costs 30
+    // alice has 52 points; tank hp level 1 costs 30
     const locked = await app.inject({ method: 'POST', url: '/api/upgrade', headers: H(tokenA), payload: { unitId: 'medic', track: 'hp' } });
     expect(locked.statusCode).toBe(400);
     const ok = await app.inject({ method: 'POST', url: '/api/upgrade', headers: H(tokenA), payload: { unitId: 'tank', track: 'hp' } });
     expect(ok.statusCode).toBe(200);
     expect(ok.json().upgrades).toEqual({ tank: { hp: 1 } });
-    expect(ok.json().points).toBe(15);
+    expect(ok.json().points).toBe(22);
     const poor = await app.inject({ method: 'POST', url: '/api/upgrade', headers: H(tokenA), payload: { unitId: 'tank', track: 'special' } });
     expect(poor.statusCode).toBe(400);
     expect(poor.json().error).toBe('點數不足');

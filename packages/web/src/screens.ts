@@ -107,7 +107,7 @@ export async function stagesScreen(ctx: Ctx) {
     const b = document.createElement('button');
     b.className = 'list-btn card';
     b.disabled = !st.unlocked;
-    b.innerHTML = `<div class="pill">${st.id}</div><img src="/assets/boss/${st.boss.unitId}.png" alt="" onerror="this.style.visibility='hidden'"><div class="grow"><div class="title">${escapeHtml(st.name)} ・ ${escapeHtml(st.boss.name)} ${st.cleared ? '✅' : ''}</div><div class="meta">${escapeHtml(st.boss.desc)}<br>敵方小喵強化 Lv ${st.powerTier + 1} ・ 首次通關 +${st.reward} 點 ・ 之後每次通關 +${Math.round(st.reward / 4)} 點</div></div>`;
+    b.innerHTML = `<div class="pill">${st.id}</div><img src="/assets/boss/${st.boss.unitId}.png" alt="" onerror="this.style.visibility='hidden'"><div class="grow"><div class="title">${escapeHtml(st.name)} ・ ${escapeHtml(st.boss.name)} ${st.cleared ? '✅' : ''}</div><div class="meta">${escapeHtml(st.boss.desc)}<br>基準正確率 ${Math.round(st.targetAccuracy * 100)}% ・ 敵方小喵強化 Lv ${st.powerTier + 1} ・ 首次通關 +${st.reward} 點 ・ 之後每次通關 +${Math.round(st.reward / 4)} 點 ・ 落敗也有一半</div></div>`;
     b.addEventListener('click', () => startStage(ctx, st));
     list.appendChild(b);
   }

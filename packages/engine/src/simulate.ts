@@ -1,4 +1,4 @@
-import { addScore, createBattle, spawn, step, TICK_MS, type BattleState } from './battle.js';
+import { addScore, createBattle, spawn, STAGE_START_SCORE, step, TICK_MS, type BattleState } from './battle.js';
 import { aiStep, createAi, DEFAULT_STRATEGY, type AiConfig } from './ai.js';
 import type { Side } from './units.js';
 import { UNIT_IDS } from './units.js';
@@ -45,7 +45,11 @@ export interface SimResult {
  */
 export function simulateMatch(left: SimPlayer, right: SimPlayer | AiConfig, seed = 1, maxSeconds = 600): SimResult {
   const rand = rng(seed);
-  const state = createBattle({ left: left.upgrades, right: 'upgrades' in right ? right.upgrades : undefined });
+  // against a stage AI the player gets the stage starting score; human-vs-human starts even at 0
+  const state = createBattle(
+    { left: left.upgrades, right: 'upgrades' in right ? right.upgrades : undefined },
+    'scorePerSec' in right ? { left: STAGE_START_SCORE, right: right.startScore ?? 0 } : {},
+  );
   const players: { side: Side; p: SimPlayer; nextAt: number; idx: number }[] = [{ side: 'left', p: left, nextAt: 0, idx: 0 }];
   let ai = null as ReturnType<typeof createAi> | null;
   if ('scorePerSec' in right) ai = createAi('right', right);

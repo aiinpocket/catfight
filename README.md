@@ -159,16 +159,17 @@ API 一覽：`/api/auth/register`、`/api/auth/login`、`/api/me`、`/api/catego
 
 ## 客製化
 
-**BOSS 與難度**：`packages/engine/src/bosses.ts` 是 100 隻名將喵的名稱、外觀提示、技能與屬性，數值隨關卡自動縮放。關卡順序依史實退場年份（`died`）由早到晚，新增 BOSS 請維持排序，美術檔 `packages/web/public/assets/boss/boss_<關卡>.png` 跟著關卡編號。整體難度只改兩處：`stages.ts` 的 `STAGE_TUNE`（AI 收入曲線、暖機、復活關卡）與 `bosses.ts` 的 `BOSS_TUNE`（BOSS 血量／攻擊倍率）。
+**BOSS 與難度**：`packages/engine/src/bosses.ts` 是 100 隻名將喵的名稱、外觀提示、技能與屬性，數值隨關卡自動縮放。關卡順序依史實退場年份（`died`）由早到晚，新增 BOSS 請維持排序，美術檔 `packages/web/public/assets/boss/boss_<關卡>.png` 跟著關卡編號。難度標準在 `packages/engine/src/schedule.ts`：第 1–10 關以「每題約 7.5 秒、正確率 40%」的讀題玩家為基準，之後每 5 關基準正確率 +5%，到第 46 關達 80% 後維持。AI 的收入等於基準玩家在該正確率下的得分速度，AI 小喵（含 BOSS 召喚／分裂）的血量攻擊從 0.7 倍隨標準升到 1 倍；每關雙方起始都有 50 分，落敗也拿一半點數。BOSS 的每關倍率由 `npm run calibrate -w @catfight/engine` 用模擬二分搜尋（基準玩家約七成勝率）寫進 `bossCalibration.ts`，改過單位／BOSS／曲線後要重跑。全域旋鈕：`stages.ts` 的 `STAGE_TUNE` 與 `bosses.ts` 的 `BOSS_TUNE`。
 
 **平衡**：數值集中在 `packages/engine/src/units.ts`、`battle.ts`（`BALANCE`）、`stages.ts`、`bosses.ts`。改完跑：
 
 ```bash
+npm run calibrate -w @catfight/engine   # 逐關校準 BOSS 倍率（約 3 分鐘），寫入 src/bossCalibration.ts
 npm run balance -w @catfight/engine     # 無頭模擬報表（對戰與各關卡勝率）
 npm test -w @catfight/engine            # 含平衡驗收測試
 ```
 
-驗收條件：兩個「每題 4 秒、正確率 70%」的玩家對打，中位數 30–50 題分勝負；第 1 關對平均玩家勝率 >75%。
+驗收條件：兩個「每題 4 秒、正確率 70%」的玩家對打，中位數 30–50 題分勝負；基準玩家（每題 7.5 秒、該關基準正確率）在抽查關卡的勝率 ≥55%。
 
 **美術**：單位、城堡、背景與 BOSS 圖已包含在 repo；想換風格可用本機 ComfyUI（Z-Image Turbo）重生：
 

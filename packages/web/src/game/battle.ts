@@ -7,6 +7,7 @@ import {
   createBattle,
   DEFAULT_STRATEGY,
   spawn,
+  STAGE_START_SCORE,
   step,
   TICK_MS,
   UNITS,
@@ -50,7 +51,7 @@ export function runBattle(root: HTMLElement, setup: BattleSetup): Promise<{ outc
     top.className = 'battle-top';
     const hud = document.createElement('div');
     hud.className = 'hud';
-    hud.innerHTML = `<div><div class="score" id="score">0</div><div>${escapeHtml(setup.me.displayName)}</div></div>
+    hud.innerHTML = `<div><div class="score" id="score">${setup.mode === 'stage' ? STAGE_START_SCORE : 0}</div><div>${escapeHtml(setup.me.displayName)}</div></div>
       <div class="timer" id="timer">0:00</div>
       <div style="text-align:right"><div>${escapeHtml(setup.opponentName)}</div><div class="timer" id="enemy-score"></div></div>`;
     top.appendChild(hud);
@@ -59,7 +60,7 @@ export function runBattle(root: HTMLElement, setup: BattleSetup): Promise<{ outc
     wrap.append(top, bar);
     root.appendChild(wrap);
 
-    const state: BattleState = createBattle({ left: setup.me.upgrades ?? {} });
+    const state: BattleState = createBattle({ left: setup.me.upgrades ?? {} }, setup.mode === 'stage' ? { left: STAGE_START_SCORE, right: setup.ai.startScore ?? 0 } : {});
     // debug/e2e hook
     (window as unknown as { __cf?: unknown }).__cf = {
       get entities() { return state.entities.length; },
@@ -228,7 +229,7 @@ function showResult(
   const acc = p.questions ? Math.round((p.correct / p.questions) * 100) : 0;
   const rewardLine = outcome
     ? p.mode === 'stage'
-      ? `獲得 ${outcome.reward} 點`
+      ? `${won ? '獲得' : '雖然落敗，仍獲得'} ${outcome.reward} 點`
       : `積分 ${outcome.ratingDelta >= 0 ? '+' : ''}${outcome.ratingDelta}`
     : `<span class="error">結果上傳失敗：${escapeHtml(err)}</span>`;
   ov.innerHTML = `

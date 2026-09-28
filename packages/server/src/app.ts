@@ -117,6 +117,7 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
       name: s.name,
       category: s.category,
       reward: s.reward,
+      targetAccuracy: s.targetAccuracy,
       powerTier: s.powerTier,
       ai: s.ai,
       boss: s.boss,
@@ -255,12 +256,15 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
       );
       let reward = 0;
       let ratingDelta = 0;
-      if (body.mode === 'stage' && body.won) {
+      if (body.mode === 'stage') {
         const prog = (await q<{ cleared_stages: number[] }>('SELECT cleared_stages FROM user_progress WHERE user_id = $1 FOR UPDATE', [uid])).rows[0];
         const st = stages[body.stage! - 1];
         const cleared = prog.cleared_stages ?? [];
-        if (!cleared.includes(body.stage!)) {
-          reward = st.reward;
+        const firstClear = !cleared.includes(body.stage!);
+        // a win pays the full first-clear reward once, then a quarter on replays; a loss still pays half of what the win would have
+        const winReward = firstClear ? st.reward : Math.round(st.reward / 4);
+        reward = body.won ? winReward : Math.floor(winReward / 2);
+        if (body.won && firstClear) {
           cleared.push(body.stage!);
           await q('UPDATE user_progress SET cleared_stages = $1, max_stage = GREATEST(max_stage, $2), points = points + $3 WHERE user_id = $4', [
             JSON.stringify(cleared),
@@ -269,7 +273,6 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
             uid,
           ]);
         } else {
-          reward = Math.round(st.reward / 4);
           await q('UPDATE user_progress SET points = points + $1 WHERE user_id = $2', [reward, uid]);
         }
       }

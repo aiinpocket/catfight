@@ -18,8 +18,10 @@ export interface AiConfig {
   warmupMs?: number;
   /** stage boss */
   boss?: BossSpawn;
-  /** stat multiplier for the AI's regular cats (bosses, summons and splits are unaffected); 1 = same as the player's */
+  /** stat multiplier for the AI's regular cats, including boss summons and splits (the boss itself is unaffected); 1 = same as the player's */
   unitMul?: { hp: number; dps: number };
+  /** score the AI starts with (mirrors the player's stage starting score) */
+  startScore?: number;
 }
 
 export interface AiState {
@@ -43,6 +45,7 @@ export function createAi(side: Side, cfg: AiConfig): AiState {
 /** Accrue score continuously and spawn according to strategy; handles boss (re)spawns. Call once per tick before step(). */
 export function aiStep(state: BattleState, ai: AiState, dtMs: number): void {
   if (state.winner) return;
+  if (ai.cfg.unitMul) state.unitMul[ai.side] = ai.cfg.unitMul;
   const boss = ai.cfg.boss;
   if (boss) {
     if (ai.bossEntityId !== null && !state.entities.some((e) => e.id === ai.bossEntityId)) {
@@ -70,14 +73,5 @@ export function aiStep(state: BattleState, ai: AiState, dtMs: number): void {
   }
   const strat = ai.cfg.strategy.length ? ai.cfg.strategy : DEFAULT_STRATEGY;
   const unitId = strat[ai.idx % strat.length];
-  const e = spawn(state, ai.side, unitId);
-  if (e) {
-    ai.idx++;
-    const m = ai.cfg.unitMul;
-    if (m) {
-      e.maxHp = Math.max(1, Math.round(e.maxHp * m.hp));
-      e.hp = e.maxHp;
-      e.dps = e.dps * m.dps;
-    }
-  }
+  if (spawn(state, ai.side, unitId)) ai.idx++;
 }

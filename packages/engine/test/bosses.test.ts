@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { abilityText, aiStep, BOSS_LIST, bossDef, buildStages, createAi, createBattle, spawn, spawnFree, stageAi, step, TICK_MS, unitDef } from '../src/index.js';
+import { abilityText, aiStep, BOSS_LIST, bossDef, buildStages, createAi, createBattle, spawn, spawnFree, stageAi, step, TICK_MS, unitDef, UNITS } from '../src/index.js';
 
 /** stage number of a boss by name (the list is ordered by historical exit year) */
 const N = (name: string) => BOSS_LIST.findIndex((b) => b.name === name) + 1;
@@ -127,7 +127,10 @@ describe('boss abilities', () => {
     s.score.left = 40;
     spawn(s, 'left', 'archer')!.x = 440; // 80 away: inside archer reach (105)
     step(s);
-    expect(s.entities.filter((e) => e.side === 'right' && e.unitId === 'tank')).toHaveLength(2);
+    const frags = s.entities.filter((e) => e.side === 'right' && e.unitId === 'tank');
+    expect(frags).toHaveLength(2);
+    // fragments share one cat's hp
+    for (const f of frags) expect(f.maxHp).toBe(Math.round(UNITS.tank.hp / 2));
 
     // 黑田官兵衛 scoreDrain
     s = createBattle();
