@@ -359,6 +359,30 @@ input:focus {
   color: var(--muted);
   font-size: 13px;
 }
+.unit-card .unit-icon {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+}
+.unit-card .meta {
+  color: var(--muted);
+  font-size: 13px;
+}
+.unit-card .title {
+  font-weight: 700;
+}
+.upgrade-row {
+  border-top: 1px solid #34497a;
+  padding-top: 8px;
+}
+.upgrade-row .next {
+  color: var(--accent);
+}
+.upgrade-row .up {
+  min-width: 76px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
 table.lb {
   width: 100%;
   border-collapse: collapse;

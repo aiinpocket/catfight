@@ -136,6 +136,30 @@ describe('stage mode', () => {
   });
 });
 
+describe('upgrades', () => {
+  it('buys levels with points, enforces unlock, cost and max level', async () => {
+    // alice has 45 points; tank hp level 1 costs 30
+    const locked = await app.inject({ method: 'POST', url: '/api/upgrade', headers: H(tokenA), payload: { unitId: 'medic', track: 'hp' } });
+    expect(locked.statusCode).toBe(400);
+    const ok = await app.inject({ method: 'POST', url: '/api/upgrade', headers: H(tokenA), payload: { unitId: 'tank', track: 'hp' } });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().upgrades).toEqual({ tank: { hp: 1 } });
+    expect(ok.json().points).toBe(15);
+    const poor = await app.inject({ method: 'POST', url: '/api/upgrade', headers: H(tokenA), payload: { unitId: 'tank', track: 'special' } });
+    expect(poor.statusCode).toBe(400);
+    expect(poor.json().error).toBe('點數不足');
+    const bad = await app.inject({ method: 'POST', url: '/api/upgrade', headers: H(tokenA), payload: { unitId: 'tank', track: 'luck' } });
+    expect(bad.statusCode).toBe(400);
+    // max level
+    await db.query(`UPDATE user_progress SET points = 100000, upgrades = '{"tank":{"hp":10}}' WHERE user_id = 1`);
+    const max = await app.inject({ method: 'POST', url: '/api/upgrade', headers: H(tokenA), payload: { unitId: 'tank', track: 'hp' } });
+    expect(max.statusCode).toBe(400);
+    expect(max.json().error).toBe('已達最高等級');
+    const me = await app.inject({ method: 'GET', url: '/api/me', headers: H(tokenA) });
+    expect(me.json().upgrades.tank.hp).toBe(10);
+  });
+});
+
 describe('versus mode', () => {
   it('falls back to a bot when nobody else has played the category', async () => {
     const r = await app.inject({ method: 'POST', url: '/api/match/opponent', headers: H(tokenB), payload: { category: 'empty_cat' } });

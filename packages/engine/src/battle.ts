@@ -1,4 +1,5 @@
 import { UNITS, type AuraType, type Side } from './units.js';
+import { effectiveStats, type Upgrades } from './upgrades.js';
 
 export const FIELD_LENGTH = 1000;
 export const BALANCE = { towerHp: 800, overtimeMs: 150_000, overtimeBleed: 10 };
@@ -25,6 +26,10 @@ export interface Entity {
   cooldown: number;
   /** true on the tick a hit lands (renderer hint) */
   hit: boolean;
+  /** effective (upgraded) dps and range for this entity */
+  dps: number;
+  range: number;
+  hpBonusFrac: number;
 }
 
 export type BattleEvent =
@@ -43,10 +48,16 @@ export interface BattleState {
   winner: Side | null;
   /** events produced during the last step (renderer hint) */
   events: BattleEvent[];
+  /** per-side unit upgrades (AI side is usually empty) */
+  upgrades: Record<Side, Upgrades>;
+  /** time (ms) until which a dead scholar's aura still applies, per side */
+  scholarLingerUntil: Record<Side, number>;
 }
 
-export function createBattle(): BattleState {
+export function createBattle(upgrades: Partial<Record<Side, Upgrades>> = {}): BattleState {
   return {
+    upgrades: { left: upgrades.left ?? {}, right: upgrades.right ?? {} },
+    scholarLingerUntil: { left: 0, right: 0 },
     tick: 0,
     timeMs: 0,
     towerHp: { left: BALANCE.towerHp, right: BALANCE.towerHp },
@@ -67,8 +78,25 @@ export function auraValue(state: BattleState, side: Side, type: AuraType): numbe
   let best = 0;
   for (const e of state.entities) {
     if (e.side !== side || e.hp <= 0) continue;
-    const a = UNITS[e.unitId].aura;
-    if (a && a.type === type) best = Math.max(best, a.value);
+    const def = UNITS[e.unitId];
+    const a = def.aura;
+    if (a && a.type === type) {
+      let v = a.value;
+      if (type === 'heal') v += effectiveStats(def, state.upgrades[side]).healBonus;
+      best = Math.max(best, v);
+    }
+  }
+  if (type === 'scoreBonus' && best === 0 && state.scholarLingerUntil[side] > state.timeMs) best = UNITS.scholar.aura!.value;
+  return best;
+}
+
+/** Attack-speed reduction applied to `side` by enemy runners on the field. */
+export function enemySlowOn(state: BattleState, side: Side): number {
+  const enemy = other(side);
+  let best = 0;
+  for (const e of state.entities) {
+    if (e.side !== enemy || e.hp <= 0 || e.unitId !== 'runner') continue;
+    best = Math.max(best, effectiveStats(UNITS.runner, state.upgrades[enemy]).enemySlow);
   }
   return best;
 }
@@ -90,7 +118,11 @@ export function spawn(state: BattleState, side: Side, unitId: string): Entity | 
   if (!canSpawn(state, side, unitId)) return null;
   const def = UNITS[unitId];
   state.score[side] -= def.cost;
-  const e: Entity = { id: state.nextId++, side, unitId, x: towerX(side), hp: def.hp, maxHp: def.hp, attacking: false, cooldown: 0, hit: false };
+  const st = effectiveStats(def, state.upgrades[side]);
+  const e: Entity = {
+    id: state.nextId++, side, unitId, x: towerX(side), hp: st.hp, maxHp: st.hp, attacking: false, cooldown: 0, hit: false,
+    dps: st.dps, range: st.range, hpBonusFrac: st.hpBonusFrac,
+  };
   state.entities.push(e);
   state.events.push({ type: 'spawn', entityId: e.id, side, unitId });
   return e;
@@ -117,6 +149,7 @@ export function step(state: BattleState, dtMs = TICK_MS): void {
   // positions at the start of the tick, so processing order does not favour either side
   const x0 = new Map<number, number>(state.entities.map((e) => [e.id, e.x]));
   const px = (t: Entity) => x0.get(t.id)!;
+  const slow: Record<Side, number> = { left: enemySlowOn(state, 'left'), right: enemySlowOn(state, 'right') };
 
   for (const e of state.entities) {
     if (e.hp <= 0) continue;
@@ -126,11 +159,12 @@ export function step(state: BattleState, dtMs = TICK_MS): void {
     const ex = px(e);
     e.attacking = false;
     e.hit = false;
-    e.cooldown = Math.max(0, e.cooldown - dt);
-    const hitDmg = def.dps * ATTACK_INTERVAL;
-    if (def.dps > 0) {
+    // slowed units recover cooldown more slowly (attack speed -X%)
+    e.cooldown = Math.max(0, e.cooldown - dt * (1 - slow[e.side]));
+    const hitDmg = e.dps * ATTACK_INTERVAL + e.maxHp * e.hpBonusFrac;
+    if (e.dps > 0) {
       const inRange = state.entities.filter(
-        (t) => t.side === enemy && t.hp > 0 && (px(t) - ex) * d >= -5 && Math.abs(px(t) - ex) <= def.range,
+        (t) => t.side === enemy && t.hp > 0 && (px(t) - ex) * d >= -5 && Math.abs(px(t) - ex) <= e.range,
       );
       if (inRange.length > 0) {
         e.attacking = true;
@@ -146,7 +180,7 @@ export function step(state: BattleState, dtMs = TICK_MS): void {
         continue;
       }
       const distTower = Math.abs(towerX(enemy) - ex);
-      if (distTower <= def.range + TOWER_RANGE_PAD) {
+      if (distTower <= e.range + TOWER_RANGE_PAD) {
         e.attacking = true;
         if (e.cooldown <= 0) {
           e.hit = true;
@@ -172,6 +206,10 @@ export function step(state: BattleState, dtMs = TICK_MS): void {
     e.hp = Math.min(e.maxHp, e.hp - dmg + heal[e.side] * dt);
     if (e.hp <= 0) {
       e.hp = 0;
+      if (e.unitId === 'scholar') {
+        const linger = effectiveStats(UNITS.scholar, state.upgrades[e.side]).auraLingerSec;
+        if (linger > 0) state.scholarLingerUntil[e.side] = Math.max(state.scholarLingerUntil[e.side], state.timeMs + linger * 1000);
+      }
       state.events.push({ type: 'death', entityId: e.id, side: e.side, unitId: e.unitId });
     }
   }

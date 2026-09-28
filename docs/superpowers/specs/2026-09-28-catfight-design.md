@@ -133,3 +133,9 @@ ComfyUI（z_image_turbo）生成單位精靈（透明背景、側面、卡通風
 - **關卡動態化**：`buildStages(categories)`，第 n 關分類 = categories[(n−1) mod 分類數]，每分類 5 輪；AI `scorePerSec = min(3.5, 0.5 + 0.18·(n−1))`、warmup 遞減、策略每 2 關升級。模擬：第 1 關弱玩家 95% 勝，第 15 關平均玩家 29% 勝。
 - 題目每次隨機抽取，且**選項順序由後端每次洗牌**後回傳（answerIndex 同步調整）。
 - 對戰模式分類清單來自 `/api/categories`（只列有題目的分類）。
+
+## 8. 強化系統（2026-09-28）
+
+- `user_progress.upgrades` JSONB：`{ unitId: { hp, atk, special } }`，各 0–10 級。`POST /api/upgrade {unitId, track}`，需先解鎖該貓，費用 20+10×新等級 點。
+- 生命／攻擊每級 +10%。特技：存款貓近戰命中附帶自身最大血量 1%×N；債券貓射程 +2N；衍生品貓攻擊 +N；分析師貓死亡後加分延續 0.2N 秒；高頻貓在場時對手攻速 −2%N（對手 cooldown 回復變慢）；保險貓每秒補血 +0.5N。
+- 引擎：`createBattle({left: upgrades})`，實體在召喚時固定 hp/dps/range；AI 方不帶強化。

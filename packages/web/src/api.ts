@@ -1,4 +1,4 @@
-import type { AiConfig, UnitDef } from '@catfight/engine';
+import type { AiConfig, UnitDef, Upgrades, UpgradeTrack } from '@catfight/engine';
 
 export interface Me {
   id: number;
@@ -7,6 +7,7 @@ export interface Me {
   points: number;
   unlockedUnits: string[];
   maxStage: number;
+  upgrades: Upgrades;
   rating: { rating: number; wins: number; losses: number };
   stats: { category: string; games: number; wins: number; questions: number; correct: number; scorePerSec: number }[];
 }
@@ -104,6 +105,7 @@ export const api = {
   questions: (category: string, limit = 50, exclude: number[] = []) =>
     call<Question[]>('GET', `/api/questions?category=${encodeURIComponent(category)}&limit=${limit}${exclude.length ? `&exclude=${exclude.join(',')}` : ''}`),
   unlock: (unitId: string) => call<Me>('POST', '/api/unlock', { unitId }),
+  upgrade: (unitId: string, track: UpgradeTrack) => call<Me>('POST', '/api/upgrade', { unitId, track }),
   opponent: (category: string) => call<Opponent>('POST', '/api/match/opponent', { category }),
   result: (r: MatchResultInput) => call<{ reward: number; ratingDelta: number; me: Me }>('POST', '/api/match/result', r),
   leaderboard: () => call<{ displayName: string; rating: number; wins: number; losses: number }[]>('GET', '/api/leaderboard'),

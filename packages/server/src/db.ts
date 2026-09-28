@@ -94,8 +94,10 @@ export async function migrate(db: DB) {
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       points INTEGER NOT NULL DEFAULT 0,
       unlocked_units JSONB NOT NULL,
-      max_stage INTEGER NOT NULL DEFAULT 0
+      max_stage INTEGER NOT NULL DEFAULT 0,
+      upgrades JSONB NOT NULL DEFAULT '{}'::jsonb
     );
+    ALTER TABLE user_progress ADD COLUMN IF NOT EXISTS upgrades JSONB NOT NULL DEFAULT '{}'::jsonb;
     CREATE TABLE IF NOT EXISTS user_stats (
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       category TEXT NOT NULL,

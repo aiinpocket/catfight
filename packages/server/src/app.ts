@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import { buildStages, DEFAULT_SCORE_PER_SEC, UNITS } from '@catfight/engine';
+import { buildStages, DEFAULT_SCORE_PER_SEC, MAX_UPGRADE_LEVEL, UNITS, UPGRADE_TRACKS, upgradeCost, upgradeLevel, type Upgrades, type UpgradeTrack } from '@catfight/engine';
 import { createUserRows, listCategories, type DB } from './db.js';
 
 export interface AppOptions {
@@ -159,6 +159,25 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
     });
   });
 
+  app.post('/api/upgrade', async (req, reply) => {
+    const uid = auth(req);
+    const { unitId, track } = z.object({ unitId: z.string(), track: z.enum(UPGRADE_TRACKS as [UpgradeTrack, ...UpgradeTrack[]]) }).parse(req.body);
+    if (!UNITS[unitId]) return reply.status(404).send({ error: 'no such unit' });
+    return db.tx(async (q) => {
+      const prog = (
+        await q<{ points: number; unlocked_units: string[]; upgrades: Upgrades }>('SELECT points, unlocked_units, upgrades FROM user_progress WHERE user_id = $1 FOR UPDATE', [uid])
+      ).rows[0];
+      if (!prog.unlocked_units.includes(unitId)) throw httpError(400, '請先解鎖這隻貓');
+      const cur = upgradeLevel(prog.upgrades, unitId, track);
+      if (cur >= MAX_UPGRADE_LEVEL) throw httpError(400, '已達最高等級');
+      const cost = upgradeCost(cur + 1);
+      if (prog.points < cost) throw httpError(400, '點數不足');
+      const next: Upgrades = { ...prog.upgrades, [unitId]: { ...(prog.upgrades[unitId] ?? {}), [track]: cur + 1 } };
+      await q('UPDATE user_progress SET points = points - $1, upgrades = $2 WHERE user_id = $3', [cost, JSON.stringify(next), uid]);
+      return getMe(db, uid, q);
+    });
+  });
+
   // ---------- versus ----------
   app.post('/api/match/opponent', async (req) => {
     const uid = auth(req);
@@ -279,9 +298,10 @@ export async function getMe(db: DB, uid: number, q: DB['query'] = db.query) {
   ).rows[0];
   if (!u) throw httpError(401, 'unauthorized');
   const prog = (
-    await q<{ points: number; unlocked_units: string[]; maxStage: number }>('SELECT points, unlocked_units, max_stage AS "maxStage" FROM user_progress WHERE user_id = $1', [
-      uid,
-    ])
+    await q<{ points: number; unlocked_units: string[]; maxStage: number; upgrades: Upgrades }>(
+      'SELECT points, unlocked_units, max_stage AS "maxStage", upgrades FROM user_progress WHERE user_id = $1',
+      [uid],
+    )
   ).rows[0];
   const rating = (await q<{ rating: number; wins: number; losses: number }>('SELECT rating, wins, losses FROM ratings WHERE user_id = $1', [uid])).rows[0];
   const stats = (
@@ -295,6 +315,7 @@ export async function getMe(db: DB, uid: number, q: DB['query'] = db.query) {
     points: prog.points,
     unlockedUnits: prog.unlocked_units,
     maxStage: prog.maxStage,
+    upgrades: prog.upgrades ?? {},
     rating,
     stats: stats.map((s) => ({ ...s, totalScore: Number(s.totalScore), totalSeconds: Number(s.totalSeconds), scorePerSec: Number(s.totalSeconds) > 0 ? Number(s.totalScore) / Number(s.totalSeconds) : 0 })),
   };
