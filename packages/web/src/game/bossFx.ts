@@ -239,6 +239,95 @@ export class BossFx {
     this.tweens.add({ targets: t, y: y - 24, alpha: 0, duration: 600, onComplete: () => t.destroy() });
   }
 
+  /** a spinning paper dart (the bond cat's certificate) with a faint paper trail */
+  dart(x1: number, y1: number, x2: number, y2: number, color: number, onArrive?: () => void) {
+    const angle = Phaser.Math.RadToDeg(Math.atan2(y2 - y1, x2 - x1));
+    const paper = this.add.rectangle(x1, y1, 16, 9, 0xfff8e6).setStrokeStyle(1, color, 1).setAngle(angle).setDepth(66);
+    const stripe = this.add.rectangle(x1, y1, 16, 3, color, 0.9).setAngle(angle).setDepth(67);
+    const d = Phaser.Math.Distance.Between(x1, y1, x2, y2);
+    const dur = Math.max(150, d * 1.3);
+    this.tweens.add({ targets: [paper, stripe], angle: angle + 540, duration: dur });
+    this.tweens.add({
+      targets: [paper, stripe],
+      x: '+=' + (x2 - x1),
+      y: '+=' + (y2 - y1),
+      duration: dur,
+      ease: 'Sine.Out',
+      onComplete: () => {
+        paper.destroy();
+        stripe.destroy();
+        onArrive?.();
+      },
+    });
+    const trail = this.h.scene.time.addEvent({
+      delay: 40,
+      repeat: Math.floor(dur / 40) - 1,
+      callback: () => {
+        const p = this.add.rectangle(paper.x, paper.y, 6, 3, 0xffffff, 0.5).setAngle(paper.angle).setDepth(65);
+        this.tweens.add({ targets: p, alpha: 0, duration: 160, onComplete: () => p.destroy() });
+      },
+    });
+    this.h.scene.time.delayedCall(dur, () => trail.remove(false));
+  }
+
+  /** violet spell ring rolling out from the caster across its whole reach (area attack) */
+  arcaneBurst(x: number, y: number, reachPx: number, dir: 1 | -1) {
+    const gy = this.h.groundY - 3;
+    // sigil under the caster
+    const sigil = this.add.ellipse(x, gy, 44, 14, 0xc084fc, 0.2).setStrokeStyle(2, 0xc084fc, 0.9).setDepth(9).setBlendMode(Phaser.BlendModes.ADD);
+    this.tweens.add({ targets: sigil, angle: 120, alpha: 0, duration: 420, onComplete: () => sigil.destroy() });
+    // the wave itself: a ring that sweeps forward to the edge of the reach
+    const wave = this.add.ellipse(x, y, 20, 46, 0xc084fc, 0).setStrokeStyle(4, 0xd8b4fe, 0.95).setDepth(71).setBlendMode(Phaser.BlendModes.ADD);
+    const glow = this.add.ellipse(x, y, 30, 56, 0xc084fc, 0.35).setDepth(70).setBlendMode(Phaser.BlendModes.ADD);
+    this.tweens.add({ targets: [wave, glow], x: x + dir * reachPx, scaleY: 1.3, alpha: 0, duration: 300, ease: 'Cubic.Out', onComplete: () => [wave, glow].forEach((o) => o.destroy()) });
+    for (let i = 0; i < 6; i++) {
+      const p = this.add.circle(x + dir * Phaser.Math.Between(6, 20), y + Phaser.Math.Between(-16, 16), 3, 0xe9d5ff, 0.95).setDepth(72).setBlendMode(Phaser.BlendModes.ADD);
+      this.tweens.add({ targets: p, x: x + dir * (reachPx * (0.4 + Math.random() * 0.6)), y: p.y - Phaser.Math.Between(6, 30), alpha: 0, duration: 260 + i * 40, onComplete: () => p.destroy() });
+    }
+  }
+
+  /** small violet flare on each creature the spell touches */
+  arcaneHit(x: number, y: number) {
+    const f = this.add.star(x, y, 6, 4, 11, 0xe9d5ff, 1).setDepth(73).setBlendMode(Phaser.BlendModes.ADD);
+    this.tweens.add({ targets: f, scale: 1.7, angle: 60, alpha: 0, duration: 240, onComplete: () => f.destroy() });
+  }
+
+  /** gold coin flash + short ground thump (the deposit cat's coin slam) */
+  coinSlam(x: number, y: number) {
+    const coin = this.add.circle(x, y, 9, 0xffd23f).setStrokeStyle(2, 0xb8860b, 1).setDepth(73);
+    const mark = this.add.text(x, y, '$', { fontSize: '12px', fontStyle: 'bold', color: '#7a5200', fontFamily: 'sans-serif' }).setOrigin(0.5).setDepth(74);
+    this.tweens.add({ targets: [coin, mark], scale: 1.6, alpha: 0, duration: 220, ease: 'Cubic.Out', onComplete: () => [coin, mark].forEach((o) => o.destroy()) });
+    this.shockwave(x, 0xffd23f, 0.5);
+  }
+
+  /** per-frame passive aura for the support cats (analyst / runner / insurer) */
+  drawUnitAura(g: Phaser.GameObjects.Graphics, unitId: string, cx: number, h: number, time: number, dir: 1 | -1) {
+    g.clear();
+    g.setBlendMode(Phaser.BlendModes.ADD);
+    const gy = this.h.groundY - 3;
+    const pulse = (time % 1400) / 1400;
+    if (unitId === 'scholar') {
+      // teal ring with three rising "chart bars" ticking upward
+      g.lineStyle(2, 0x5eead4, 0.35 + 0.15 * Math.sin(time / 260)).strokeEllipse(cx, gy, 36, 10);
+      for (let k = 0; k < 3; k++) {
+        const p = (pulse + k / 3) % 1;
+        const bx = cx - dir * (10 - k * 8);
+        g.fillStyle(0x5eead4, 0.6 * (1 - p)).fillRect(bx - 2, gy - 6 - p * (14 + k * 6), 4, 6 + k * 3);
+      }
+    } else if (unitId === 'runner') {
+      // wind streaks flicking behind the feet
+      for (let k = 0; k < 3; k++) {
+        const p = (pulse * 2 + k / 3) % 1;
+        const yy = gy - 4 - k * 6;
+        g.lineStyle(2, 0x9ff3ff, 0.55 * (1 - p)).lineBetween(cx - dir * (8 + p * 10), yy, cx - dir * (22 + p * 26), yy);
+      }
+    } else if (unitId === 'medic') {
+      const p = pulse;
+      g.lineStyle(2, 0x7dff9a, 0.6 * (1 - p)).strokeEllipse(cx, gy, 30 + p * 50, 9 + p * 14);
+      g.lineStyle(2, 0x7dff9a, 0.4).strokeEllipse(cx, gy, 30, 9);
+    }
+  }
+
   /** per-frame passive aura drawn under/around the boss */
   drawAura(g: Phaser.GameObjects.Graphics, e: Entity, style: BossStyle, cx: number, h: number, time: number, dir: 1 | -1) {
     g.clear();

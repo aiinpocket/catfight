@@ -149,13 +149,14 @@ export class BattleScene extends Phaser.Scene {
           a.lunge = -12;
         } else if (style && a && attacker) {
           this.bossHit(a, attacker, style, ev.targetId, target, tx, ty, big, pierceDrawn);
+        } else if (a && attacker && UNITS[attacker.unitId]) {
+          this.unitHit(a, attacker, tx, ty, big, pierceDrawn);
         } else if (ev.ranged && a) {
           this.shootProjectile(this.centerX(a), this.groundY - a.img.displayHeight * 0.6, tx, ty, aside, () => this.impact(tx, ty, aside === 'left' ? 0x9fd3ff : 0xffb3b3, big));
           a.lunge = -8; // recoil
         } else if (a) {
-          const abig = !!byId.get(ev.attackerId)?.unitId.startsWith('boss_');
-          a.lunge = this.strikeLen(abig); // strike: the whole body snaps into the target
-          this.slash(tx, ty, aside, abig);
+          a.lunge = this.strikeLen(false);
+          this.slash(tx, ty, aside, false);
           this.impact(tx, ty, 0xffffff, big);
         }
         if (t) {
@@ -193,6 +194,8 @@ export class BattleScene extends Phaser.Scene {
               this.bossFx.shockwave(tx, 0xff9a3c, 1.4);
               this.damageText(tx, ty - 34, '破城！', '#ff9a3c');
             }
+          } else if (UNITS[attacker.unitId]) {
+            this.unitHit(a, attacker, tx, ty, false, pierceDrawn);
           } else if (attacker.range > 60) {
             this.shootProjectile(this.centerX(a), this.groundY - a.img.displayHeight * 0.6, tx, ty, attacker.side, () => this.impact(tx, ty, 0xffffff, false));
             a.lunge = -8;
@@ -306,6 +309,47 @@ export class BattleScene extends Phaser.Scene {
     if (kind === 'execute' && targetId >= 0 && !target) this.bossFx.executeMark(tx, ty);
   }
 
+  /** A regular cat's attack: each of the six has its own move (deposit coin slam, bond dart, derivative spell wave, HFT double-jab). */
+  private unitHit(a: SpriteRec, attacker: Entity, tx: number, ty: number, big: boolean, swingDrawn: Set<number>) {
+    const dir: 1 | -1 = attacker.side === 'left' ? 1 : -1;
+    const ax = this.centerX(a);
+    const ay = this.groundY - a.img.displayHeight * 0.55;
+    switch (attacker.unitId) {
+      case 'tank':
+        a.lunge = 34;
+        this.slash(tx, ty, attacker.side, false, 0xffd23f);
+        this.bossFx.coinSlam(tx, ty);
+        this.impact(tx, ty, 0xffd23f, big);
+        break;
+      case 'runner':
+        a.lunge = 40;
+        this.bossFx.afterimage(a.img, 0x9ff3ff);
+        this.bossFx.speedLines(ax - dir * a.img.displayWidth * 0.3, ay, dir, 0x9ff3ff);
+        this.bossFx.crossSlash(tx, ty, 0x9ff3ff, 0.8);
+        this.impact(tx, ty, 0x9ff3ff, big);
+        break;
+      case 'archer':
+        a.lunge = -8;
+        this.bossFx.dart(ax + dir * 8, ay, tx, ty, 0x34d399, () => this.impact(tx, ty, 0xbfffd1, big));
+        break;
+      case 'mage': {
+        a.lunge = -6;
+        // one wave per cast even though every creature in reach takes a hit
+        if (!swingDrawn.has(attacker.id)) {
+          swingDrawn.add(attacker.id);
+          const reachPx = (attacker.range / FIELD_LENGTH) * (this.scale.width - this.padX * 2);
+          this.bossFx.arcaneBurst(ax, ay, reachPx, dir);
+        }
+        this.bossFx.arcaneHit(tx, ty);
+        break;
+      }
+      default:
+        a.lunge = this.strikeLen(false);
+        this.slash(tx, ty, attacker.side, false);
+        this.impact(tx, ty, 0xffffff, big);
+    }
+  }
+
   /** expanding ring + spark burst at the point of impact */
   private impact(x: number, y: number, color: number, big: boolean) {
     const r = big ? 14 : 9;
@@ -349,9 +393,13 @@ export class BattleScene extends Phaser.Scene {
   }
 
   // ---------- per-frame state sync ----------
+  private medicAlive: Record<Side, boolean> = { left: false, right: false };
+
   private render(time: number, delta: number) {
     const st = this.driver.state;
     const alive = new Set<number>();
+    this.medicAlive.left = st.entities.some((e) => e.side === 'left' && e.unitId === 'medic');
+    this.medicAlive.right = st.entities.some((e) => e.side === 'right' && e.unitId === 'medic');
     for (const e of st.entities) {
       alive.add(e.id);
       let s = this.sprites.get(e.id);
@@ -366,8 +414,8 @@ export class BattleScene extends Phaser.Scene {
         if (e.side === 'right' && !boss) img.setFlipX(true).setTint(0xffc9c9);
         if (e.side === 'left' && boss) img.setFlipX(true);
         s = { img, hp: this.add.graphics(), hurtUntil: 0, lunge: 0, knock: 0, base: scale, spawnAt: boss ? this.time.now : 0, lastTarget: null, nextFx: 0 };
+        if (boss || UNITS[e.unitId]?.aura) s.aura = this.add.graphics().setDepth(9);
         if (boss) {
-          s.aura = this.add.graphics().setDepth(9);
           s.label = this.add
             .text(img.x, 0, this.driver.bossName ?? 'BOSS', { fontSize: '11px', fontStyle: 'bold', color: '#ffe066', fontFamily: 'sans-serif', stroke: '#000000', strokeThickness: 3 })
             .setOrigin(0.5, 1)
@@ -436,6 +484,12 @@ export class BattleScene extends Phaser.Scene {
     else if (enraged) s.img.setTint(0xff9a9a);
     else if (e.side === 'right' && !boss) s.img.setTint(0xffc9c9);
     else s.img.clearTint();
+    if (s.aura && !boss) this.bossFx.drawUnitAura(s.aura, e.unitId, this.centerX(s), s.img.displayHeight, time, dir);
+    // insured allies sparkle while they are being healed back up
+    if (!boss && e.hp < e.maxHp && this.medicAlive[e.side] && time > s.nextFx) {
+      s.nextFx = time + 700;
+      this.bossFx.healSparkle(this.centerX(s), this.groundY - s.img.displayHeight * 0.7);
+    }
     if (s.aura && style) {
       this.bossFx.drawAura(s.aura, e, style, this.centerX(s), s.img.displayHeight, time, dir);
       // ambient: regenerating bosses sparkle while below full hp
