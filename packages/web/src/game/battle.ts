@@ -13,7 +13,7 @@ import {
   type AiConfig,
   type BattleState,
 } from '@catfight/engine';
-import { api, type Me, type MatchResultInput } from '../api';
+import { api, type Me, type MatchResultInput, ApiError } from '../api';
 import { BattleScene } from './BattleScene';
 import { escapeHtml, QuestionFeed, QuizPanel } from './quiz';
 
@@ -148,9 +148,14 @@ export function runBattle(root: HTMLElement, setup: BattleSetup): Promise<{ outc
       });
     refreshBar();
 
+    // tell the server a battle is in progress so deploys can wait for a quiet moment
+    const heartbeat = window.setInterval(() => void api.heartbeat().catch(() => {}), 30_000);
+    void api.heartbeat().catch(() => {});
+
     async function finish() {
       if (finished) return;
       finished = true;
+      window.clearInterval(heartbeat);
       quiz.stop();
       const won = state.winner === 'left';
       const seconds = Math.max(1, Math.round(state.timeMs / 1000));
@@ -167,11 +172,18 @@ export function runBattle(root: HTMLElement, setup: BattleSetup): Promise<{ outc
       };
       let outcome: BattleOutcome | null = null;
       let err = '';
-      try {
-        const r = await api.result(payload);
-        outcome = { won, seconds, score: totalScore, questions: payload.questions, correct: payload.correct, reward: r.reward, ratingDelta: r.ratingDelta, me: r.me };
-      } catch (e) {
-        err = (e as Error).message;
+      // the server may be mid-restart (deploy): retry a few times before giving up on recording the result
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          const r = await api.result(payload);
+          outcome = { won, seconds, score: totalScore, questions: payload.questions, correct: payload.correct, reward: r.reward, ratingDelta: r.ratingDelta, me: r.me };
+          err = '';
+          break;
+        } catch (e) {
+          err = (e as Error).message;
+          if (e instanceof ApiError && e.status >= 400 && e.status < 500) break;
+          await new Promise((res) => setTimeout(res, 1500 * (attempt + 1)));
+        }
       }
       showResult(wrap, won, payload, outcome, err, quiz.stats.wrong, (retry) => {
         game.destroy(true);

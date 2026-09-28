@@ -60,8 +60,23 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
     reply.status(e.statusCode ?? 500).send({ error: e.message ?? 'error' });
   });
 
+  // users seen in a battle recently (heartbeat or question fetch); lets deploys wait for a quiet moment
+  const activeBattles = new Map<number, number>();
+  const ACTIVE_WINDOW_MS = 60_000;
+  const touchActive = (uid: number) => activeBattles.set(uid, Date.now());
+  const countActive = () => {
+    const now = Date.now();
+    for (const [uid, t] of activeBattles) if (now - t > ACTIVE_WINDOW_MS) activeBattles.delete(uid);
+    return activeBattles.size;
+  };
+
   app.get('/api/health', async () => {
     await db.query('SELECT 1');
+    return { ok: true, activeBattles: countActive() };
+  });
+
+  app.post('/api/battle/heartbeat', async (req) => {
+    touchActive(auth(req));
     return { ok: true };
   });
 
@@ -93,9 +108,10 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
 
   app.get('/api/stages', async (req) => {
     const uid = auth(req);
-    const prog = await db.query<{ max_stage: number }>('SELECT max_stage FROM user_progress WHERE user_id = $1', [uid]);
-    const maxStage = prog.rows[0]?.max_stage ?? 0;
+    const prog = await db.query<{ cleared_stages: number[] }>('SELECT cleared_stages FROM user_progress WHERE user_id = $1', [uid]);
+    const cleared = new Set(prog.rows[0]?.cleared_stages ?? []);
     const cats = (await listCategories(db)).filter((c) => c.count > 0);
+    // every stage is open: players pick the exam category they care about
     return buildStages(cats).map((s) => ({
       id: s.id,
       name: s.name,
@@ -103,8 +119,8 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
       reward: s.reward,
       ai: s.ai,
       boss: s.boss,
-      unlocked: s.id <= maxStage + 1,
-      cleared: s.id <= maxStage,
+      unlocked: true,
+      cleared: cleared.has(s.id),
     }));
   });
 
@@ -146,6 +162,7 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
   // ---------- progression ----------
   app.post('/api/unlock', async (req, reply) => {
     const uid = auth(req);
+    touchActive(uid);
     const { unitId } = z.object({ unitId: z.string() }).parse(req.body);
     const def = UNITS[unitId];
     if (!def) return reply.status(404).send({ error: 'no such unit' });
@@ -198,6 +215,7 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
 
   app.post('/api/match/result', async (req, reply) => {
     const uid = auth(req);
+    activeBattles.delete(uid);
     const body = z
       .object({
         mode: z.enum(['stage', 'versus']),
@@ -237,11 +255,18 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
       let reward = 0;
       let ratingDelta = 0;
       if (body.mode === 'stage' && body.won) {
-        const prog = (await q<{ max_stage: number }>('SELECT max_stage FROM user_progress WHERE user_id = $1 FOR UPDATE', [uid])).rows[0];
+        const prog = (await q<{ cleared_stages: number[] }>('SELECT cleared_stages FROM user_progress WHERE user_id = $1 FOR UPDATE', [uid])).rows[0];
         const st = stages[body.stage! - 1];
-        if (body.stage! > prog.max_stage) {
+        const cleared = prog.cleared_stages ?? [];
+        if (!cleared.includes(body.stage!)) {
           reward = st.reward;
-          await q('UPDATE user_progress SET max_stage = $1, points = points + $2 WHERE user_id = $3', [body.stage, reward, uid]);
+          cleared.push(body.stage!);
+          await q('UPDATE user_progress SET cleared_stages = $1, max_stage = GREATEST(max_stage, $2), points = points + $3 WHERE user_id = $4', [
+            JSON.stringify(cleared),
+            body.stage,
+            reward,
+            uid,
+          ]);
         } else {
           reward = Math.round(st.reward / 4);
           await q('UPDATE user_progress SET points = points + $1 WHERE user_id = $2', [reward, uid]);
@@ -299,8 +324,8 @@ export async function getMe(db: DB, uid: number, q: DB['query'] = db.query) {
   ).rows[0];
   if (!u) throw httpError(401, 'unauthorized');
   const prog = (
-    await q<{ points: number; unlocked_units: string[]; maxStage: number; upgrades: Upgrades }>(
-      'SELECT points, unlocked_units, max_stage AS "maxStage", upgrades FROM user_progress WHERE user_id = $1',
+    await q<{ points: number; unlocked_units: string[]; clearedCount: number; upgrades: Upgrades }>(
+      'SELECT points, unlocked_units, jsonb_array_length(cleared_stages)::int AS "clearedCount", upgrades FROM user_progress WHERE user_id = $1',
       [uid],
     )
   ).rows[0];
@@ -315,7 +340,7 @@ export async function getMe(db: DB, uid: number, q: DB['query'] = db.query) {
     ...u,
     points: prog.points,
     unlockedUnits: prog.unlocked_units,
-    maxStage: prog.maxStage,
+    clearedCount: Number(prog.clearedCount),
     upgrades: prog.upgrades ?? {},
     rating,
     stats: stats.map((s) => ({ ...s, totalScore: Number(s.totalScore), totalSeconds: Number(s.totalSeconds), scorePerSec: Number(s.totalSeconds) > 0 ? Number(s.totalScore) / Number(s.totalSeconds) : 0 })),

@@ -98,6 +98,10 @@ export async function migrate(db: DB) {
       upgrades JSONB NOT NULL DEFAULT '{}'::jsonb
     );
     ALTER TABLE user_progress ADD COLUMN IF NOT EXISTS upgrades JSONB NOT NULL DEFAULT '{}'::jsonb;
+    -- all stages are open; first-clear rewards are tracked per stage instead of by a linear max_stage
+    ALTER TABLE user_progress ADD COLUMN IF NOT EXISTS cleared_stages JSONB NOT NULL DEFAULT '[]'::jsonb;
+    UPDATE user_progress SET cleared_stages = COALESCE((SELECT jsonb_agg(g) FROM generate_series(1, max_stage) g), '[]'::jsonb)
+      WHERE max_stage > 0 AND cleared_stages = '[]'::jsonb;
     CREATE TABLE IF NOT EXISTS user_stats (
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       category TEXT NOT NULL,

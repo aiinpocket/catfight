@@ -69,7 +69,7 @@ export function menuScreen(ctx: Ctx) {
   const s = screen(
     ctx.root,
     `<h1>金融貓咪大作戰</h1>
-    <div class="card row"><div class="grow"><b>${escapeHtml(me.displayName)}</b><div class="sub" style="text-align:left">積分 ${me.rating.rating} ・ 點數 ${me.points} ・ 已通關 ${me.maxStage} 關</div></div>
+    <div class="card row"><div class="grow"><b>${escapeHtml(me.displayName)}</b><div class="sub" style="text-align:left">積分 ${me.rating.rating} ・ 點數 ${me.points} ・ 已通關 ${me.clearedCount} 關</div></div>
       <button class="ghost" id="logout">登出</button></div>
     <button class="list-btn card" id="stage"><img src="/assets/tank.png" alt=""><div><div class="title">關卡模式</div><div class="meta">逐關推進，賺點數解鎖新貓咪</div></div></button>
     <button class="list-btn card" id="versus"><img src="/assets/runner.png" alt=""><div><div class="title">對戰模式</div><div class="meta">選題型配對其他玩家，爭排行榜積分</div></div></button>
@@ -101,7 +101,7 @@ export async function stagesScreen(ctx: Ctx) {
     const b = document.createElement('button');
     b.className = 'list-btn card';
     b.disabled = !st.unlocked;
-    b.innerHTML = `<div class="pill">${st.id}</div><img src="/assets/boss/${st.boss.unitId}.png" alt="" onerror="this.style.visibility='hidden'"><div class="grow"><div class="title">${escapeHtml(st.name)} ・ ${escapeHtml(st.boss.name)} ${st.cleared ? '✅' : ''}</div><div class="meta">${escapeHtml(st.boss.desc)}<br>首次通關 +${st.reward} 點 ・ 對手強度 ${st.ai.scorePerSec.toFixed(1)}</div></div>`;
+    b.innerHTML = `<div class="pill">${st.id}</div><img src="/assets/boss/${st.boss.unitId}.png" alt="" onerror="this.style.visibility='hidden'"><div class="grow"><div class="title">${escapeHtml(st.name)} ・ ${escapeHtml(st.boss.name)} ${st.cleared ? '✅' : ''}</div><div class="meta">${escapeHtml(st.boss.desc)}<br>首次通關 +${st.reward} 點 ・ 之後每次通關 +${Math.round(st.reward / 4)} 點</div></div>`;
     b.addEventListener('click', () => startStage(ctx, st));
     list.appendChild(b);
   }

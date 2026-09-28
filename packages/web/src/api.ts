@@ -6,7 +6,7 @@ export interface Me {
   displayName: string;
   points: number;
   unlockedUnits: string[];
-  maxStage: number;
+  clearedCount: number;
   upgrades: Upgrades;
   rating: { rating: number; wins: number; losses: number };
   stats: { category: string; games: number; wins: number; questions: number; correct: number; scorePerSec: number }[];
@@ -108,6 +108,7 @@ export const api = {
   unlock: (unitId: string) => call<Me>('POST', '/api/unlock', { unitId }),
   upgrade: (unitId: string, track: UpgradeTrack) => call<Me>('POST', '/api/upgrade', { unitId, track }),
   opponent: (category: string) => call<Opponent>('POST', '/api/match/opponent', { category }),
+  heartbeat: () => call<{ ok: boolean }>('POST', '/api/battle/heartbeat'),
   result: (r: MatchResultInput) => call<{ reward: number; ratingDelta: number; me: Me }>('POST', '/api/match/result', r),
   leaderboard: () => call<{ displayName: string; rating: number; wins: number; losses: number }[]>('GET', '/api/leaderboard'),
 };

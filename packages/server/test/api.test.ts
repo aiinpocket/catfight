@@ -62,6 +62,20 @@ describe('categories, questions and stages', () => {
     ]);
   });
 
+  it('reports active battles from heartbeats and clears them on result', async () => {
+    const tokenD = (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'dave', displayName: 'D', password: 'password4' } })).json().token as string;
+    expect((await app.inject({ method: 'GET', url: '/api/health' })).json().activeBattles).toBe(0);
+    expect((await app.inject({ method: 'POST', url: '/api/battle/heartbeat', headers: H(tokenD) })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: '/api/health' })).json().activeBattles).toBe(1);
+    await app.inject({
+      method: 'POST',
+      url: '/api/match/result',
+      headers: H(tokenD),
+      payload: { mode: 'stage', category: 'finance_basics', stage: 1, won: false, score: 10, seconds: 30, questions: 5, correct: 1 },
+    });
+    expect((await app.inject({ method: 'GET', url: '/api/health' })).json().activeBattles).toBe(0);
+  });
+
   it('re-importing the same bank adds nothing', async () => {
     const n = await importBank(db, { category: { id: 'security', name: '安控', sortOrder: 2 }, questions: [{ text: '安控題', options: ['A', 'B', 'C', 'D'], answerIndex: 1 }] });
     expect(n).toBe(0);
@@ -124,8 +138,7 @@ describe('categories, questions and stages', () => {
     expect(st[6].boss.name).toBe('真田幸村喵');
     expect(st[6].ai.boss.unitId).toBe('boss_7');
     expect(st[7].boss.desc).toContain('貫穿');
-    expect(st[0].unlocked).toBe(true);
-    expect(st[1].unlocked).toBe(false);
+    expect(st.every((s) => s.unlocked)).toBe(true);
   });
 });
 
@@ -136,10 +149,18 @@ describe('stage mode', () => {
     expect(r.statusCode).toBe(200);
     expect(r.json().reward).toBe(60);
     expect(r.json().me.points).toBe(60);
-    expect(r.json().me.maxStage).toBe(1);
+    expect(r.json().me.clearedCount).toBe(1);
 
-    const st = (await app.inject({ method: 'GET', url: '/api/stages', headers: H(tokenA) })).json();
-    expect(st[1].unlocked).toBe(true);
+    const st = (await app.inject({ method: 'GET', url: '/api/stages', headers: H(tokenA) })).json() as { cleared: boolean }[];
+    expect(st[0].cleared).toBe(true);
+    expect(st[1].cleared).toBe(false);
+
+    // stages can be cleared in any order; each one pays its first-clear reward once
+    const tokenC = (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'carol', displayName: 'C', password: 'password3' } })).json().token as string;
+    const r3 = await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenC), payload: { ...payload, stage: 2, category: 'security' } });
+    expect(r3.json().reward).toBe(70);
+    expect(r3.json().me.clearedCount).toBe(1);
+    expect((await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenC), payload: { ...payload, stage: 2, category: 'security' } })).json().reward).toBe(18);
 
     expect((await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenA), payload })).json().reward).toBe(15);
     expect((await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenA), payload: { ...payload, won: false } })).json().reward).toBe(0);
