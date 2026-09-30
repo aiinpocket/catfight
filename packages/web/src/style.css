@@ -174,9 +174,16 @@ input:focus {
 }
 .battle-top {
   position: relative;
-  flex: 0 0 42%;
-  min-height: 220px;
+  flex: 0 0 38%;
+  min-height: 200px;
   background: #0f1a33;
+}
+/* short screens: give the question more of the height */
+@media (max-height: 720px) {
+  .battle-top {
+    flex-basis: 32%;
+    min-height: 180px;
+  }
 }
 .battle-top canvas {
   display: block;
@@ -234,13 +241,52 @@ input:focus {
 .unit-btn.ready {
   outline: 2px solid var(--accent);
 }
+/*
+ * The quiz never clips text. QuizPanel.fit() picks the roomiest layout that fits the panel
+ * (two columns -> one column -> smaller type); if even the tightest one overflows, the panel scrolls.
+ */
 .quiz {
+  --q-fs: 16px;
+  --o-fs: 14px;
   flex: 1;
   display: flex;
   flex-direction: column;
   padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
   gap: 8px;
   min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.quiz .more-hint {
+  display: none;
+}
+.quiz.scrolls:not(.at-end) .more-hint {
+  display: block;
+  position: sticky;
+  bottom: calc(-10px - env(safe-area-inset-bottom));
+  margin: -8px -12px calc(-10px - env(safe-area-inset-bottom));
+  padding: 14px 0 8px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  background: linear-gradient(to bottom, rgba(27, 42, 74, 0), var(--bg) 55%);
+  pointer-events: none;
+}
+.quiz.fit-1 {
+  --q-fs: 15px;
+  --o-fs: 13px;
+  gap: 6px;
+}
+.quiz.fit-2 {
+  --q-fs: 14px;
+  --o-fs: 12.5px;
+  gap: 5px;
+}
+.quiz.fit-3 {
+  --q-fs: 13px;
+  --o-fs: 12px;
+  gap: 4px;
 }
 .quiz .q-head {
   display: flex;
@@ -249,28 +295,39 @@ input:focus {
   color: var(--muted);
 }
 .quiz .q-text {
-  font-size: 16px;
+  font-size: var(--q-fs);
   line-height: 1.4;
-  min-height: 44px;
-  flex: 0 1 auto;
-  overflow-y: auto;
+  flex: 0 0 auto;
+  overflow-wrap: anywhere;
 }
 .quiz .options {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  grid-auto-rows: 1fr;
   gap: 8px;
-  flex: 1;
-  min-height: 0;
+  /* fill the spare height, but never shrink below the text: the panel scrolls instead */
+  flex: 1 0 auto;
+}
+.quiz.one-col .options {
+  grid-template-columns: 1fr;
+  grid-auto-rows: auto;
+  gap: 6px;
 }
 .quiz .opt {
-  font-size: 14px;
+  font-size: var(--o-fs);
   line-height: 1.3;
   padding: 8px 8px;
+  min-height: 40px;
   text-align: left;
   display: flex;
   gap: 6px;
   align-items: center;
-  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.quiz.fit-2 .opt,
+.quiz.fit-3 .opt {
+  padding: 6px 8px;
+  min-height: 36px;
 }
 .quiz .opt b {
   color: var(--accent);

@@ -82,6 +82,10 @@ export class QuestionFeed {
   }
 }
 
+/** layouts tried in order, roomiest first; the first one whose content fits the panel wins */
+const FIT_LEVELS = ['', 'one-col', 'one-col fit-1', 'one-col fit-2', 'one-col fit-3'];
+const FIT_CLASSES = ['one-col', 'fit-1', 'fit-2', 'fit-3'];
+
 /** DOM quiz panel: renders questions, handles answers with the green/red timing rules. */
 export class QuizPanel {
   readonly el: HTMLElement;
@@ -89,9 +93,11 @@ export class QuizPanel {
   private qText: HTMLElement;
   private opts: HTMLButtonElement[] = [];
   private head: HTMLElement;
+  private hint: HTMLElement;
   private current: Question | null = null;
   private locked = false;
   private stopped = false;
+  private onResize = () => this.fit();
 
   constructor(private feed: QuestionFeed, private handlers: QuizHandlers) {
     this.el = document.createElement('div');
@@ -110,16 +116,39 @@ export class QuizPanel {
       grid.appendChild(b);
       this.opts.push(b);
     }
-    this.el.append(this.head, this.qText, grid);
+    this.hint = document.createElement('div');
+    this.hint.className = 'more-hint';
+    this.hint.textContent = '↓ 往下滑看完整選項';
+    this.el.append(this.head, this.qText, grid, this.hint);
+    this.el.addEventListener('scroll', () => this.el.classList.toggle('at-end', this.el.scrollTop + this.el.clientHeight >= this.el.scrollHeight - 8), { passive: true });
   }
 
   start() {
+    window.addEventListener('resize', this.onResize);
     this.showNext();
   }
 
   stop() {
     this.stopped = true;
     this.locked = true;
+    window.removeEventListener('resize', this.onResize);
+  }
+
+  /**
+   * Long questions or options must stay fully readable: pick the roomiest layout that fits the panel
+   * (two columns, then one column, then smaller type). If nothing fits, the tightest layout stays and the panel scrolls.
+   */
+  private fit() {
+    const el = this.el;
+    for (const level of FIT_LEVELS) {
+      el.classList.remove(...FIT_CLASSES);
+      if (level) el.classList.add(...level.split(' '));
+      if (el.scrollHeight <= el.clientHeight + 1) break;
+    }
+    el.scrollTop = 0;
+    // still too long: the panel scrolls, so tell the player there is more below until they reach the end
+    el.classList.toggle('scrolls', el.scrollHeight > el.clientHeight + 1);
+    el.classList.remove('at-end');
   }
 
   private showNext() {
@@ -142,6 +171,7 @@ export class QuizPanel {
       b.disabled = false;
       b.innerHTML = `<b>${labels[i]}</b><span>${escapeHtml(t.q.options[i] ?? '')}</span>`;
     });
+    this.fit();
   }
 
   private answer(i: number) {
