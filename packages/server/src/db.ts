@@ -152,6 +152,15 @@ export async function migrate(db: DB) {
     CREATE UNIQUE INDEX IF NOT EXISTS uq_questions_cat_text_opts ON questions(category, text, options);
     CREATE INDEX IF NOT EXISTS idx_questions_category ON questions(category);
     CREATE INDEX IF NOT EXISTS idx_match_user ON match_results(user_id);
+    -- per-player history of each question: how often it came up and how often it was answered wrong
+    CREATE TABLE IF NOT EXISTS user_question_stats (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      question_id INTEGER NOT NULL REFERENCES questions(id) ON DELETE CASCADE,
+      seen INTEGER NOT NULL DEFAULT 0,
+      wrong INTEGER NOT NULL DEFAULT 0,
+      last_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id, question_id)
+    );
   `);
 }
 

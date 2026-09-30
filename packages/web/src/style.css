@@ -352,6 +352,40 @@ input:focus {
   border-radius: 10px;
   padding: 10px;
 }
+.review .item.ok {
+  border-left: 4px solid var(--good);
+}
+.review .item.bad {
+  border-left: 4px solid var(--bad);
+}
+.review.only-bad .item.ok {
+  display: none;
+}
+.review .q-no {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.review .item.ok .q-no b {
+  color: var(--good);
+}
+.review .item.bad .q-no b {
+  color: var(--bad);
+}
+.review .miss {
+  color: var(--accent);
+}
+.review .clean {
+  color: var(--muted);
+}
+.review .yours {
+  color: var(--bad);
+}
+.review-filter button.on {
+  outline: 2px solid var(--accent);
+}
 .review .ans {
   color: var(--good);
 }

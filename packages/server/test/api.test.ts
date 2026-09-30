@@ -264,3 +264,30 @@ describe('versus mode', () => {
     expect(r.statusCode).toBe(400);
   });
 });
+
+describe('answer history', () => {
+  it('counts how often a player has missed each question, across battles and per player', async () => {
+    const token = (await app.inject({ method: 'POST', url: '/api/auth/register', payload: { username: 'erin', displayName: 'E', password: 'password5' } })).json().token as string;
+    const qs = (await app.inject({ method: 'GET', url: '/api/questions?category=finance_basics&limit=2', headers: H(token) })).json() as { id: number }[];
+    const [q1, q2] = qs.map((q) => q.id);
+    const base = { mode: 'stage', category: 'finance_basics', stage: 1, won: false, score: 10, seconds: 30, questions: 3, correct: 1 };
+    // q1 missed twice in one battle, q2 answered right; an id that does not exist is ignored
+    const r1 = await app.inject({
+      method: 'POST',
+      url: '/api/match/result',
+      headers: H(token),
+      payload: { ...base, questions: 4, answers: [{ questionId: q1, correct: false }, { questionId: q2, correct: true }, { questionId: q1, correct: false }, { questionId: 999999, correct: false }] },
+    });
+    expect(r1.statusCode).toBe(200);
+    expect(r1.json().wrongCounts).toEqual({ [q1]: 2, [q2]: 0 });
+    // next battle: totals carry over
+    const r2 = await app.inject({ method: 'POST', url: '/api/match/result', headers: H(token), payload: { ...base, questions: 2, answers: [{ questionId: q1, correct: true }, { questionId: q2, correct: false }] } });
+    expect(r2.json().wrongCounts).toEqual({ [q1]: 2, [q2]: 1 });
+    // another player has their own history; a result without answers still works
+    const r3 = await app.inject({ method: 'POST', url: '/api/match/result', headers: H(tokenB), payload: { ...base, questions: 1, correct: 0, answers: [{ questionId: q1, correct: false }] } });
+    expect(r3.json().wrongCounts).toEqual({ [q1]: 1 });
+    const r4 = await app.inject({ method: 'POST', url: '/api/match/result', headers: H(token), payload: base });
+    expect(r4.statusCode).toBe(200);
+    expect(r4.json().wrongCounts).toEqual({});
+  });
+});

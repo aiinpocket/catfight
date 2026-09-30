@@ -17,7 +17,7 @@ import {
 } from '@catfight/engine';
 import { api, stashPendingResult, type Me, type MatchResultInput, ApiError } from '../api';
 import { BattleScene } from './BattleScene';
-import { escapeHtml, QuestionFeed, QuizPanel } from './quiz';
+import { escapeHtml, QuestionFeed, QuizPanel, type AnswerRecord } from './quiz';
 
 export interface BattleSetup {
   mode: 'stage' | 'versus';
@@ -38,6 +38,8 @@ export interface BattleOutcome {
   correct: number;
   reward: number;
   ratingDelta: number;
+  /** total times the player has ever missed each question answered this battle (by question id) */
+  wrongCounts: Record<number, number>;
   me: Me;
 }
 
@@ -176,6 +178,7 @@ export function runBattle(root: HTMLElement, setup: BattleSetup): Promise<{ outc
         seconds,
         questions: quiz.stats.answered,
         correct: quiz.stats.correct,
+        answers: quiz.stats.log.map((a) => ({ questionId: a.question.id, correct: a.correct })),
       };
       let outcome: BattleOutcome | null = null;
       let err = '';
@@ -183,7 +186,7 @@ export function runBattle(root: HTMLElement, setup: BattleSetup): Promise<{ outc
       for (let attempt = 0; attempt < 4; attempt++) {
         try {
           const r = await api.result(payload);
-          outcome = { won, seconds, score: totalScore, questions: payload.questions, correct: payload.correct, reward: r.reward, ratingDelta: r.ratingDelta, me: r.me };
+          outcome = { won, seconds, score: totalScore, questions: payload.questions, correct: payload.correct, reward: r.reward, ratingDelta: r.ratingDelta, wrongCounts: r.wrongCounts ?? {}, me: r.me };
           err = '';
           break;
         } catch (e) {
@@ -198,13 +201,38 @@ export function runBattle(root: HTMLElement, setup: BattleSetup): Promise<{ outc
           await new Promise((res) => setTimeout(res, 1500 * (attempt + 1)));
         }
       }
-      showResult(wrap, won, payload, outcome, err, quiz.stats.wrong, (retry) => {
+      showResult(wrap, won, payload, outcome, err, quiz.stats.log, (retry) => {
         game.destroy(true);
         root.innerHTML = '';
         resolve({ outcome, retry });
       });
     }
   });
+}
+
+/**
+ * Full answer record for the battle, in order: right answers are listed too (some were guesses),
+ * each with how many times the player has missed that question in total.
+ */
+function reviewHtml(log: AnswerRecord[], wrongCounts: Record<number, number> | null): string {
+  if (!log.length) return '<p class="sub">這場沒有作答紀錄。</p>';
+  const bad = log.filter((a) => !a.correct).length;
+  const items = log
+    .map((a, i) => {
+      const q = a.question;
+      const misses = wrongCounts?.[q.id] ?? 0;
+      const history = wrongCounts ? (misses > 0 ? `<span class="miss">這題你累計答錯 ${misses} 次</span>` : '<span class="clean">這題你沒答錯過</span>') : '';
+      return `<div class="item ${a.correct ? 'ok' : 'bad'}">
+          <div class="q-no"><b>${a.correct ? '✓' : '✗'} 第 ${i + 1} 題</b>${history}</div>
+          <div>${escapeHtml(q.text)}</div>
+          <div class="ans">正解：${escapeHtml(q.options[q.answerIndex] ?? '')}</div>
+          ${a.correct ? '' : `<div class="yours">你的答案：${escapeHtml(q.options[a.chosen] ?? '')}</div>`}
+          ${q.explanation ? `<div class="exp">${escapeHtml(q.explanation)}</div>` : ''}</div>`;
+    })
+    .join('');
+  return `<h2>答題紀錄（${log.length} 題，答錯 ${bad}）</h2>
+    <div class="review-filter row"><button class="grow on" data-f="all">全部</button><button class="grow" data-f="bad" ${bad ? '' : 'disabled'}>只看答錯</button></div>
+    <div class="review">${items}</div>`;
 }
 
 function toast(parent: HTMLElement, text: string) {
@@ -221,7 +249,7 @@ function showResult(
   p: MatchResultInput,
   outcome: BattleOutcome | null,
   err: string,
-  wrong: { question: { text: string; options: string[]; answerIndex: number; explanation?: string }; chosen: number }[],
+  log: AnswerRecord[],
   done: (retry: boolean) => void,
 ) {
   const ov = document.createElement('div');
@@ -241,14 +269,14 @@ function showResult(
       <div><div class="v">${Math.floor(p.seconds / 60)}:${String(p.seconds % 60).padStart(2, '0')}</div><div class="k">時間</div></div>
     </div>
     <div class="row"><button class="primary grow" id="retry">再玩一次</button><button class="grow" id="back">回主選單</button></div>
-    ${wrong.length ? `<h2>答錯的題目（${wrong.length}）</h2>` : '<p class="sub">全部答對，太強了！</p>'}
-    <div class="review">${wrong
-      .map(
-        (w) => `<div class="item"><div>${escapeHtml(w.question.text)}</div>
-          <div class="ans">正解：${escapeHtml(w.question.options[w.question.answerIndex])}</div>
-          <div class="exp">你的答案：${escapeHtml(w.question.options[w.chosen])}${w.question.explanation ? `<br>${escapeHtml(w.question.explanation)}` : ''}</div></div>`,
-      )
-      .join('')}</div>`;
+    ${reviewHtml(log, outcome?.wrongCounts ?? null)}`;
+  const review = ov.querySelector('.review') as HTMLElement | null;
+  ov.querySelectorAll<HTMLButtonElement>('.review-filter button').forEach((b) =>
+    b.addEventListener('click', () => {
+      ov.querySelectorAll('.review-filter button').forEach((x) => x.classList.toggle('on', x === b));
+      review?.classList.toggle('only-bad', b.dataset.f === 'bad');
+    }),
+  );
   ov.querySelector('#retry')!.addEventListener('click', () => done(true));
   ov.querySelector('#back')!.addEventListener('click', () => done(false));
   parent.appendChild(ov);

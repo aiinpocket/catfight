@@ -5,15 +5,17 @@ export const WRONG_DELAY_MS = 1200;
 export const BATCH_SIZE = 50;
 export const PREFETCH_AT = 25;
 
-export interface WrongAnswer {
+export interface AnswerRecord {
   question: Question;
   chosen: number;
+  correct: boolean;
 }
 
 export interface QuizStats {
   answered: number;
   correct: number;
-  wrong: WrongAnswer[];
+  /** every answer in the order it was given */
+  log: AnswerRecord[];
 }
 
 export interface QuizHandlers {
@@ -83,7 +85,7 @@ export class QuestionFeed {
 /** DOM quiz panel: renders questions, handles answers with the green/red timing rules. */
 export class QuizPanel {
   readonly el: HTMLElement;
-  readonly stats: QuizStats = { answered: 0, correct: 0, wrong: [] };
+  readonly stats: QuizStats = { answered: 0, correct: 0, log: [] };
   private qText: HTMLElement;
   private opts: HTMLButtonElement[] = [];
   private head: HTMLElement;
@@ -148,6 +150,7 @@ export class QuizPanel {
     const q = this.current;
     this.stats.answered++;
     const ok = i === q.answerIndex;
+    this.stats.log.push({ question: q, chosen: i, correct: ok });
     this.opts.forEach((b) => (b.disabled = true));
     if (ok) {
       this.stats.correct++;
@@ -156,7 +159,6 @@ export class QuizPanel {
       this.handlers.onCorrect();
       setTimeout(() => this.showNext(), CORRECT_DELAY_MS);
     } else {
-      this.stats.wrong.push({ question: q, chosen: i });
       this.opts[i].classList.add('wrong');
       this.opts[q.answerIndex].classList.add('correct');
       this.opts.forEach((b, k) => {

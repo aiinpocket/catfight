@@ -57,6 +57,8 @@ export interface MatchResultInput {
   seconds: number;
   questions: number;
   correct: number;
+  /** every answer given this battle, in order */
+  answers?: { questionId: number; correct: boolean }[];
 }
 
 const TOKEN_KEY = 'catfight.token';
@@ -146,6 +148,6 @@ export const api = {
   upgrade: (unitId: string, track: UpgradeTrack) => call<Me>('POST', '/api/upgrade', { unitId, track }),
   opponent: (category: string) => call<Opponent>('POST', '/api/match/opponent', { category }),
   heartbeat: () => call<{ ok: boolean }>('POST', '/api/battle/heartbeat'),
-  result: (r: MatchResultInput) => call<{ reward: number; ratingDelta: number; me: Me }>('POST', '/api/match/result', r),
+  result: (r: MatchResultInput) => call<{ reward: number; ratingDelta: number; wrongCounts?: Record<number, number>; me: Me }>('POST', '/api/match/result', r),
   leaderboard: () => call<{ displayName: string; rating: number; wins: number; losses: number }[]>('GET', '/api/leaderboard'),
 };

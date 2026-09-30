@@ -229,6 +229,8 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
         seconds: z.number().min(1).max(3600),
         questions: z.number().int().min(0),
         correct: z.number().int().min(0),
+        // every answer given this battle, in order (a question can come up more than once)
+        answers: z.array(z.object({ questionId: z.number().int().positive(), correct: z.boolean() })).max(2000).optional(),
       })
       .parse(req.body);
     if (body.correct > body.questions) return reply.status(400).send({ error: 'bad stats' });
@@ -285,7 +287,30 @@ export function buildApp({ db, jwtSecret, logger = false }: AppOptions): Fastify
           uid,
         ]);
       }
-      return { reward, ratingDelta, me: await getMe(db, uid, q) };
+      // per-question history: add this battle's answers, then report how often each of these questions has been missed in total
+      const wrongCounts: Record<number, number> = {};
+      if (body.answers?.length) {
+        const agg = new Map<number, { seen: number; wrong: number }>();
+        for (const a of body.answers) {
+          const e = agg.get(a.questionId) ?? { seen: 0, wrong: 0 };
+          e.seen++;
+          if (!a.correct) e.wrong++;
+          agg.set(a.questionId, e);
+        }
+        const ids = [...agg.keys()];
+        // questions deleted since the battle started simply drop out of the join
+        const r = await q<{ question_id: number; wrong: number }>(
+          `INSERT INTO user_question_stats (user_id, question_id, seen, wrong, last_at)
+           SELECT $1, qu.id, a.seen, a.wrong, now()
+           FROM unnest($2::int[], $3::int[], $4::int[]) AS a(qid, seen, wrong) JOIN questions qu ON qu.id = a.qid
+           ON CONFLICT (user_id, question_id) DO UPDATE SET seen = user_question_stats.seen + EXCLUDED.seen,
+             wrong = user_question_stats.wrong + EXCLUDED.wrong, last_at = now()
+           RETURNING question_id, wrong`,
+          [uid, ids, ids.map((id) => agg.get(id)!.seen), ids.map((id) => agg.get(id)!.wrong)],
+        );
+        for (const row of r.rows) wrongCounts[row.question_id] = row.wrong;
+      }
+      return { reward, ratingDelta, wrongCounts, me: await getMe(db, uid, q) };
     });
     return out;
   });
