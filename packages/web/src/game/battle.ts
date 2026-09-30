@@ -224,7 +224,7 @@ function reviewHtml(log: AnswerRecord[], wrongCounts: Record<number, number> | n
       const history = wrongCounts ? (misses > 0 ? `<span class="miss">這題你累計答錯 ${misses} 次</span>` : '<span class="clean">這題你沒答錯過</span>') : '';
       return `<div class="item ${a.correct ? 'ok' : 'bad'}">
           <div class="q-no"><b>${a.correct ? '✓' : '✗'} 第 ${i + 1} 題</b>${history}</div>
-          <div>${escapeHtml(q.text)}</div>
+          <div class="q-body">${escapeHtml(q.text)}</div>
           <div class="ans">正解：${escapeHtml(q.options[q.answerIndex] ?? '')}</div>
           ${a.correct ? '' : `<div class="yours">你的答案：${escapeHtml(q.options[a.chosen] ?? '')}</div>`}
           ${q.explanation ? `<div class="exp">${escapeHtml(q.explanation)}</div>` : ''}</div>`;

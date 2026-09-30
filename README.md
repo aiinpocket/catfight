@@ -66,6 +66,13 @@ SITE_ADDRESS=quiz.example.com    # Caddy 會自動申請 HTTPS 憑證
 DATABASE_URL=pglite://volumes/pglite-check npm run import-questions -w @catfight/server
 ```
 
+修正過題幹或選項的題目會被當成新題匯入，舊的那一筆仍留在資料庫。匯入腳本結尾會列出這些「已不在任何題庫檔裡」的殘留題（只看這次有檔案的分類），確認後加 `--prune` 刪除（該題的玩家答錯紀錄一併移除）。正式環境在 app 容器內執行：
+
+```bash
+docker compose exec app npx tsx scripts/import-questions.ts /app/data/questions          # 只列出
+docker compose exec app npx tsx scripts/import-questions.ts /app/data/questions --prune  # 刪除
+```
+
 ### 從考古題 PDF 轉題庫（可選）
 
 `tools/tabf_import.py` 可以把台灣金融研訓院（TABF）與證基會（SFI）公開的考古題 PDF 轉成上述格式，需要 `pip install pdfplumber`。PDF 放 `data/pdf/<分類>/`，依版型選 `--layout`：

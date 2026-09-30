@@ -297,6 +297,7 @@ input:focus {
 .quiz .q-text {
   font-size: var(--q-fs);
   line-height: 1.4;
+  white-space: pre-line;
   flex: 0 0 auto;
   overflow-wrap: anywhere;
 }
@@ -403,6 +404,9 @@ input:focus {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+.review .q-body {
+  white-space: pre-line;
 }
 .review .item {
   background: var(--panel);

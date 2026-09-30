@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
-import { importBank, openPglite, type DB } from '../src/db.js';
+import { deleteQuestions, findStaleQuestions, importBank, openPglite, type DB } from '../src/db.js';
 
 let db: DB;
 let app: FastifyInstance;
@@ -289,5 +289,27 @@ describe('answer history', () => {
     const r4 = await app.inject({ method: 'POST', url: '/api/match/result', headers: H(token), payload: base });
     expect(r4.statusCode).toBe(200);
     expect(r4.json().wrongCounts).toEqual({});
+  });
+});
+
+describe('pruning corrected questions', () => {
+  it('finds rows that no bank file contains any more, only in the categories the files cover', async () => {
+    const cat = { id: 'prune_cat', name: '修剪', sortOrder: 9 };
+    const good = { text: '正確的題目', options: ['A', 'B', 'C', 'D'], answerIndex: 0 };
+    await importBank(db, { category: cat, questions: [good, { text: '正確的題目', options: ['A', 'B', 'C', 'D 黏到下一題的案例'], answerIndex: 0 }, { text: '舊題幹', options: ['A', 'B', 'C', 'D'], answerIndex: 1 }] });
+    // the corrected bank is split over two files of the same category
+    const banks = [
+      { category: cat, questions: [good] },
+      { category: cat, questions: [{ text: '【案例】…\n【問題】舊題幹', options: ['A', 'B', 'C', 'D'], answerIndex: 1 }] },
+    ];
+    for (const b of banks) await importBank(db, b);
+    const stale = await findStaleQuestions(db, banks);
+    expect(stale.map((s) => s.text).sort()).toEqual(['正確的題目', '舊題幹']);
+    expect(stale.every((s) => s.category === 'prune_cat')).toBe(true);
+    const before = Number((await db.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM questions WHERE category <> 'prune_cat'")).rows[0].n);
+    expect(await deleteQuestions(db, stale.map((s) => s.id))).toBe(2);
+    expect(await findStaleQuestions(db, banks)).toEqual([]);
+    expect(Number((await db.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM questions WHERE category = 'prune_cat'")).rows[0].n)).toBe(2);
+    expect(Number((await db.query<{ n: number }>("SELECT COUNT(*)::int AS n FROM questions WHERE category <> 'prune_cat'")).rows[0].n)).toBe(before);
   });
 });

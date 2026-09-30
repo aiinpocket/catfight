@@ -22,6 +22,10 @@ file stem, e.g. 01_81 for data/pdf/sfi/01_81.pdf + 01_81a.pdf.
 
 Multiple-answer items (e.g. "2、3、4") and items whose text could not be parsed into exactly
 four options are skipped and reported, so nothing malformed reaches the game.
+
+Case-study groups ("請根據下列案例，回答第 37~40題：" followed by the case) are attached to the stem of
+every question in the group as "【案例】…\n【問題】…": the game serves questions one at a time in random
+order, so each one has to carry its own case.
 """
 import argparse
 import json
@@ -36,6 +40,8 @@ sys.stdout.reconfigure(encoding="utf-8")
 # "55「. 題目」" — an opening quote sometimes lands between the number and the dot; keep the quote with the text
 Q_RE = re.compile(r"^(\d{1,2})(「?)\.\s*(.*)$")
 OPT_RE = re.compile(r"^\((\d)\)\s*(.*)$")
+# "請根據下列案例，回答第 37~40題：" — the lines after it, up to question 37, are the case shared by 37..40
+CASE_RE = re.compile(r"^請?(?:根據|依據|依|就)(?:下列|以下)案例.{0,6}回答第\s*(\d{1,2})\s*[~～\-－至]\s*(\d{1,2})\s*題[：:]?\s*(.*)$")
 NOISE_RE = re.compile(
     r"^(第\s*[\d一二三四]+\s*部分|注意：|※\s*注意|本試卷|鉛筆在|答案卡|選作答|測驗為單一選擇題|為單一選擇題|\d+\s*$|台灣金融研訓院|節次：|科目：|第\s*\d+\s*期.*測驗試題$|\d+\s*年\s*第\s*\d+\s*次.*測驗試題)"
 )
@@ -60,19 +66,31 @@ def page_lines(pdf_path, columns=1):
 
 
 def parse_questions(pdf_path, columns=1):
-    """Return {num: {"text": str, "options": {1..4: str}}}."""
+    """Return {num: {"text": str, "options": {1..4: str}, "case": str (only for case-study questions)}}."""
     qs = {}
     cur = None
     cur_opt = None
+    cases = []  # [first, last, text]
+    in_case = False
     for ln in page_lines(pdf_path, columns):
         m = Q_RE.match(ln)
         # a new question starts with "N." where N is the expected next number (guards against "1.5 分" etc.)
         if m and (cur is None and int(m.group(1)) == 1 or cur is not None and int(m.group(1)) == cur + 1):
             cur = int(m.group(1))
             cur_opt = None
+            in_case = False
             qs[cur] = {"text": (m.group(2) + m.group(3)).strip(), "options": {}}
             continue
         if cur is None:
+            continue
+        mc = CASE_RE.match(ln)
+        if mc and int(mc.group(1)) == cur + 1:
+            # the case belongs to the questions that follow, not to the option being read
+            cases.append([int(mc.group(1)), int(mc.group(2)), mc.group(3)])
+            in_case = True
+            continue
+        if in_case:
+            cases[-1][2] += ln
             continue
         # several options may share one line: "(1)一人 (2)二人 (3)三人 (4)四人"
         parts = re.split(r"(?=\(\d\))", ln)
@@ -93,6 +111,10 @@ def parse_questions(pdf_path, columns=1):
             qs[cur]["text"] += ln
         else:
             qs[cur]["options"][cur_opt] += ln
+    for first, last, text in cases:
+        for n in range(first, last + 1):
+            if n in qs:
+                qs[n]["case"] = text
     return qs
 
 
@@ -237,6 +259,8 @@ def main():
                 if len(text) < 4:
                     skipped.append((tag, "題目太短"))
                     continue
+                if q.get("case"):
+                    text = f"【案例】{clean(q['case'])}\n【問題】{text}"
                 questions.append(
                     {
                         "text": text,

@@ -202,6 +202,41 @@ export async function importBank(db: DB, bank: QuestionBankFile): Promise<number
   });
 }
 
+export interface StaleQuestion {
+  id: number;
+  category: string;
+  text: string;
+  options: string[];
+  source: string | null;
+}
+
+/**
+ * Questions in the database that no bank file contains any more, for the categories those files cover.
+ * A question is identified by (category, text, options), so a corrected stem or option leaves the old
+ * row behind on re-import; this finds those leftovers. Categories without a file are not touched.
+ */
+export async function findStaleQuestions(db: DB, banks: QuestionBankFile[]): Promise<StaleQuestion[]> {
+  const key = (text: string, options: string[]) => JSON.stringify([text, options]);
+  const keep = new Map<string, Set<string>>();
+  for (const b of banks) {
+    const set = keep.get(b.category.id) ?? new Set<string>();
+    for (const q of b.questions) set.add(key(q.text, q.options));
+    keep.set(b.category.id, set);
+  }
+  const stale: StaleQuestion[] = [];
+  for (const [category, set] of keep) {
+    const r = await db.query<StaleQuestion>('SELECT id, category, text, options, source FROM questions WHERE category = $1 ORDER BY id', [category]);
+    for (const row of r.rows) if (!set.has(key(row.text, row.options))) stale.push(row);
+  }
+  return stale;
+}
+
+/** Delete questions by id (their per-player answer history goes with them). Returns the number deleted. */
+export async function deleteQuestions(db: DB, ids: number[]): Promise<number> {
+  if (!ids.length) return 0;
+  return (await db.query('DELETE FROM questions WHERE id = ANY($1::int[])', [ids])).rowCount;
+}
+
 export async function listCategories(db: DB): Promise<{ id: string; name: string; count: number }[]> {
   const r = await db.query<{ id: string; name: string; count: string }>(
     `SELECT c.id, c.name, COUNT(q.id)::int AS count FROM categories c LEFT JOIN questions q ON q.category = c.id
